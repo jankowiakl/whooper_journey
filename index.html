@@ -1,0 +1,1981 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bird Journey Viewer</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <style>
+    :root{
+      --text:#e8eefc; --muted:#aab7da; --accent:#77d1ff; --danger:#ff6b6b; --ok:#39d98a;
+      --border:rgba(255,255,255,.10); --shadow:0 10px 30px rgba(0,0,0,.35); --radius:16px;
+    }
+    body{
+      margin:0;
+      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
+      background:linear-gradient(180deg,#070b14 0%,#0b1220 60%,#07101e 100%);
+      color:var(--text);
+    }
+    header{
+      padding:14px 18px;
+      border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+    }
+    header h1{ font-size:22px; font-weight:800; margin:0; letter-spacing:.2px; }
+    header .hint{ font-size:18px; color:var(--muted); margin:0; line-height:1.35; }
+
+    .wrap{
+      display:grid;
+      grid-template-columns:1.65fr 1.15fr;
+      gap:14px;
+      padding:14px;
+      height:calc(100vh - 62px);
+      box-sizing:border-box;
+      min-height:0;
+    }
+    .card{
+      background:radial-gradient(1200px 800px at 30% -20%, rgba(119,209,255,.12), transparent 55%),
+                 linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      min-height:0;
+      position:relative;
+    }
+    .mapStack{ height:100%; min-height:0; }
+    #mapFollow{ width:100%; height:100%; }
+
+    .overviewInset{
+      position:absolute;
+      right:12px; top:12px;
+      width:min(38vw,360px);
+      height:220px;
+      border-radius:14px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 18px 40px rgba(0,0,0,.45);
+      background:rgba(0,0,0,.25);
+      z-index:650;
+    }
+    #mapOverview{ width:100%; height:100%; }
+
+    .badge{
+      position:absolute;
+      left:12px; top:12px;
+      z-index:700;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.35);
+      backdrop-filter:blur(8px);
+      font-size:18px;
+      color:var(--text);
+      pointer-events:none;
+    }
+    .badge.overview{ left:auto; right:18px; top:18px; }
+
+    .side{
+      position:relative;
+      display:grid;
+      grid-template-rows:auto auto;
+      gap:14px;
+      min-height:0;
+      overflow:hidden;
+      padding-right:2px;
+    }
+    .panel{ padding:14px; }
+    .panelHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px; margin-bottom:10px;
+    }
+    .panelHeader .title{ font-size:19px; font-weight:800; letter-spacing:.2px; }
+    .panelHeader .subtitle{ font-size:18px; color:var(--muted); margin-left:10px; font-weight:500; }
+    .panelHeaderLeft{ display:flex; align-items:baseline; flex-wrap:wrap; }
+
+    .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+    label{ display:block; font-size:18px; color:var(--muted); margin-bottom:6px; }
+
+    select, input[type="range"], input[type="number"], input[type="text"]{
+      width:100%;
+      box-sizing:border-box;
+      background:rgba(0,0,0,.25);
+      border:1px solid var(--border);
+      border-radius:12px;
+      color:var(--text);
+      padding:10px 10px;
+      outline:none;
+    }
+    input[type="file"]{ width:100%; color:var(--muted); }
+
+    button{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(119,209,255,.20), rgba(119,209,255,.08));
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    button.secondary{ background:rgba(0,0,0,.20); }
+    button.danger{ background:linear-gradient(180deg, rgba(255,107,107,.22), rgba(255,107,107,.08)); }
+    button:disabled{ opacity:.55; cursor:not-allowed; }
+    button.tiny{ padding:8px 10px; border-radius:10px; font-weight:800; font-size:18px; }
+
+    .btnrow{ display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+    .status{
+      margin-top:10px;
+      font-size:18px;
+      color:var(--muted);
+      line-height:1.45;
+      white-space:pre-wrap;
+    }
+
+    /* Settings collapse (ONLY hides Settings body; Playback stays visible) */
+    .settingsBody{ display:block; }
+    .settingsCollapsed .settingsBody{ display:none; }
+    .settingsCollapsed .panelHeader{ margin-bottom:0; }
+    .settingsCollapsed .status{ display:none; }
+
+    #settingsCard .settingsBody{
+      max-height:360px;
+      overflow:auto;
+      padding-right:6px;
+      margin-top:10px;
+    }
+    #settingsCard label{ font-size:17px; margin-bottom:4px; }
+    #settingsCard .panelHeader{ margin-bottom:8px; }
+    #settingsCard .panelHeader .title{ font-size:18px; }
+    #settingsCard .panelHeader .subtitle{ font-size:17px; }
+    #settingsCard .row{ gap:8px; margin-top:8px; }
+    #settingsCard .btnrow{ gap:8px; margin-top:10px; }
+    #settingsCard select, #settingsCard input[type="range"], #settingsCard input[type="number"], #settingsCard input[type="text"]{
+      padding:8px 8px; border-radius:10px; font-size:18px;
+    }
+    #settingsCard button{ padding:8px 10px; border-radius:10px; font-size:18px; }
+    #settingsCard button.tiny{ padding:6px 8px; border-radius:9px; font-size:17px; }
+
+    .checkRow{
+      display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:10px;
+    }
+    .checkRow label{
+      margin:0;
+      display:inline-flex; align-items:center; gap:8px;
+      color:var(--text); font-weight:800;
+    }
+    .checkRow input[type="checkbox"]{ transform:translateY(1px); }
+
+    .metaGrid{
+      display:grid; gap:6px;
+      font-size:18px; color:var(--text);
+      text-align:center;
+    }
+    .metaGrid b{ font-size:19px; }
+    .metaGrid .muted{ color:var(--muted); }
+    #metaTime,#metaCoords{ font-size:26px; }
+
+    .miniNote{ margin-top:6px; font-size:17px; color:var(--muted); line-height:1.35; }
+
+    .leaflet-control-attribution, .leaflet-control-scale{
+      background:rgba(0,0,0,.35) !important;
+      color:rgba(255,255,255,.75) !important;
+      border-radius:10px !important;
+      padding:2px 6px !important;
+      border:1px solid rgba(255,255,255,.15) !important;
+      backdrop-filter:blur(6px);
+    }
+    .leaflet-container{ background:#0a0f1c; }
+
+    /* Playback card */
+    #playbackCard .row{ margin-top:8px; }
+    #timelineWrap{ margin-top:10px; }
+    #timelineTime{ font-size:18px; color:var(--muted); margin-top:6px; text-align:center; }
+
+    /* ALL animation modal (bigger) */
+    #allModal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.60);
+      backdrop-filter:blur(8px);
+      z-index:5000;
+      display:none;
+    }
+    #allModal.show{ display:flex; }
+
+    /* BIGGER modal: smaller margins + larger max size */
+    #allModalInner{
+      margin:auto;
+      width:min(1900px, calc(100vw - 12px));
+      height:min(980px, calc(100vh - 12px));
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.16);
+      box-shadow:0 26px 70px rgba(0,0,0,.55);
+      overflow:hidden;
+      background:radial-gradient(1200px 700px at 30% -20%, rgba(119,209,255,.12), transparent 55%),
+                 linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      position:relative;
+      display:grid;
+      grid-template-rows:auto 1fr auto;
+    }
+    /* Fullscreen toggle for ALL animation panel */
+    #allModalInner.fullscreen{
+      width:100vw;
+      height:100vh;
+      margin:0;
+      border-radius:0;
+    }
+
+    #allModalHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      gap:12px;
+    }
+    #allModalHeader .title{ font-weight:900; font-size:19px; letter-spacing:.2px; }
+    #allModalHeader .sub{ font-size:18px; color:var(--muted); margin-left:10px; font-weight:600; }
+
+    /* Map wrap to place overlay timestamp */
+    #allMapWrap{ position:relative; }
+    #allMap{ width:100%; height:100%; }
+
+    /* BIG timestamp overlay (larger + readable) */
+    #allTimeOverlay{
+      position:absolute;
+      left:50%;
+      top:12px;
+      transform:translateX(-50%);
+      z-index:6000;
+      pointer-events:none;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.20);
+      background:rgba(0,0,0,.55);
+      backdrop-filter:blur(8px);
+      box-shadow:0 18px 45px rgba(0,0,0,.40);
+      font-weight:950;
+      letter-spacing:.2px;
+      font-size:28px;         /* <— larger timestamp */
+      color:var(--text);
+      white-space:nowrap;
+    }
+
+    #allControls{
+      border-top:1px solid rgba(255,255,255,.10);
+      padding:12px 14px;
+      display:grid;
+      gap:10px;
+    }
+    #allControls .row2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    #allControls .btnrow{ margin-top:0; }
+
+    .pillMini{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.18);
+      font-size:18px;
+      color:var(--text);
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    /* Make the time pill bigger too */
+    #allTimeNow{
+      font-size:20px;
+      padding:8px 12px;
+      font-weight:950;
+    }
+
+    /* Permanent labels in ALL map */
+    .leaflet-tooltip.idLabel{
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 2px 6px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      font-weight: 900;
+      letter-spacing: .1px;
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div>
+    <h1>Bird Journey Viewer</h1>
+    <p class="hint">
+      v01<br/>
+      CSV date parsing supports ISO-8601 (with Z/ms), “YYYY-MM-DD HH:MM:SS”, “DD/MM/YYYY …”, “MM/DD/YYYY …”, and Unix seconds/ms.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card mapStack">
+    <div class="badge">Follow (zoomed)</div>
+    <div id="mapFollow"></div>
+    <div class="overviewInset">
+      <div class="badge overview">Overview</div>
+      <div id="mapOverview"></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <!-- SETTINGS -->
+    <div class="card panel settings" id="settingsCard">
+      <div class="panelHeader">
+        <div class="panelHeaderLeft">
+          <span class="title">Settings</span>
+          <span class="subtitle">CSV → columns → basemap → loop → music</span>
+        </div>
+        <button id="toggleSettings" class="secondary tiny" type="button">Hide</button>
+      </div>
+
+      <div class="settingsBody" id="settingsBody">
+        <label>1) Select file</label>
+        <input id="fileInput" type="file" accept=".csv,text/csv,.txt,text/plain" />
+
+        <div class="btnrow" style="margin-top:10px;">
+          <button id="loadExampleBtn" class="secondary" type="button">Load example data</button>
+          <a id="saveExampleBtn" href="example_data.csv" download="example_data.csv" class="secondary" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:rgba(0,0,0,.20);color:var(--text);font-weight:800;letter-spacing:.2px;">Save example data</a>
+        </div>
+        <div class="row">
+          <div>
+            <label>Delimiter</label>
+            <select id="delimiter">
+              <option value="," selected>Comma (,)</option>
+              <option value=";">Semicolon (;)</option>
+              <option value="\t">Tab (TSV)</option>
+            </select>
+          </div>
+          <div>
+            <label>Header row</label>
+            <select id="hasHeader">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>ID column</label>
+            <select id="colId" disabled><option value="">—</option></select>
+          </div>
+          <div>
+            <label>Datetime column</label>
+            <select id="colTime" disabled><option value="">—</option></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Latitude column</label>
+            <select id="colLat" disabled><option value="">—</option></select>
+          </div>
+          <div>
+            <label>Longitude column</label>
+            <select id="colLon" disabled><option value="">—</option></select>
+          </div>
+        </div>
+
+        <div class="btnrow">
+          <button id="applyColsBtn" disabled type="button">Apply columns</button>
+          <button id="clearBtn" class="secondary" disabled type="button">Clear</button>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Basemap (labels/style)</label>
+            <select id="basemapSelect">
+              <option value="osmStd" selected>OSM Standard (local labels)</option>
+              <option value="osmDE">OSM DE (Latin transliteration)</option>
+              <option value="cartoPos">CARTO Positron (light)</option>
+              <option value="cartoVoy">CARTO Voyager (color)</option>
+              <option value="opentopo">OpenTopoMap</option>
+            </select>
+          </div>
+          <div>
+            <label>Follow map zoom</label>
+            <input id="followZoom" type="number" min="2" max="18" step="1" value="12">
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Follow update</label>
+            <select id="followMode">
+              <option value="edge" selected>only when near edge</option>
+              <option value="always">always center</option>
+            </select>
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <div class="checkRow" style="margin-top:0;">
+              <label title="Loop current bird"><input id="loopCurrent" type="checkbox"> Loop this bird</label>
+              <label title="Loop all birds"><input id="loopAll" type="checkbox"> Loop all birds</label>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:0;height:1px;background:rgba(255,255,255,.08);margin:12px 0;">
+
+        <div class="row">
+          <div>
+            <label>Background music</label>
+            <select id="musicSelect">
+              <option value="off" selected>Off</option>
+              <option value="sample">Relaxing sample (free)</option>
+              <option value="upload">Upload your own</option>
+            </select>
+          </div>
+          <div>
+            <label>Volume</label>
+            <input id="musicVol" type="range" min="0" max="1" step="0.01" value="0.35" />
+          </div>
+        </div>
+
+        <div id="musicUploadRow" style="display:none; margin-top:10px;">
+          <label>Upload audio file (mp3/ogg/wav)</label>
+          <input id="musicFile" type="file" accept="audio/*" />
+        </div>
+
+        <div class="btnrow" style="margin-top:10px;">
+          <button id="musicToggle" class="secondary tiny" type="button" disabled>Play music</button>
+        </div>
+        <div class="miniNote" id="musicAttribution"></div>
+      </div>
+
+      <div class="status" id="status">Select a CSV file to begin.</div>
+    </div>
+
+    <!-- PLAYBACK (always visible; includes ID selection) -->
+    <div class="card panel" id="playbackCard">
+      <div class="panelHeader">
+        <div class="panelHeaderLeft">
+          <span class="title">Playback</span>
+          <span class="subtitle">bird + timeline + speed + play</span>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:0;">
+        <div>
+          <label>Individual (bird id)</label>
+          <select id="birdSelect" disabled>
+            <option value="">—</option>
+          </select>
+        </div>
+        <div>
+          <label>All birds</label>
+          <div class="btnrow" style="margin-top:0;">
+            <button id="showAllBtn" class="secondary" type="button" disabled>Show ALL (static)</button>
+            <button id="animateAllBtn" type="button" disabled>Animate ALL</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button id="playBtn" class="secondary" disabled type="button">Play</button>
+        <button id="pauseBtn" class="secondary" disabled type="button">Pause</button>
+        <button id="resetBtn" class="danger" disabled type="button">Reset</button>
+      </div>
+
+      <div id="timelineWrap">
+        <label>Timeline</label>
+        <input id="timeline" type="range" min="0" max="1" step="0.001" value="0" disabled />
+        <div id="timelineTime">—</div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Animation speed</label>
+          <input id="speed" type="range" min="0.25" max="6" step="0.25" value="1" disabled />
+        </div>
+        <div>
+          <label>Leg duration (seconds)</label>
+          <input id="legSeconds" type="number" min="0.3" max="30" step="0.1" value="3.0" disabled>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Hold at points (seconds)</label>
+          <input id="holdSeconds" type="number" min="0" max="10" step="0.1" value="1.0" disabled>
+        </div>
+        <div>
+          <label>Tip</label>
+          <div class="miniNote">Drag timeline to jump. If it was playing, it continues automatically after you release.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- META -->
+    <div class="card panel">
+      <div class="metaGrid">
+        <div><b id="metaBird">Bird: —</b></div>
+        <div class="muted" id="metaTime">Time: —</div>
+        <div class="muted" id="metaCoords">Lat/Lon: —</div>
+        <div class="muted" id="metaInfo">Points used: —</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ALL animation modal -->
+<div id="allModal">
+  <div id="allModalInner">
+    <div id="allModalHeader">
+      <div>
+        <span class="title">Animate ALL birds</span>
+        <span class="sub" id="allModalSub">—</span>
+      </div>
+      <div class="btnrow" style="margin-top:0;">
+        <button id="allFullscreenBtn" class="secondary tiny" type="button">Fullscreen</button>
+        <button id="allCloseBtn" class="secondary tiny" type="button">Close</button>
+      </div>
+    </div>
+
+    <div id="allMapWrap">
+      <div id="allMap"></div>
+      <div id="allTimeOverlay">Time: —</div>
+    </div>
+
+    <div id="allControls">
+      <div class="btnrow" style="margin-top:0; justify-content:space-between;">
+        <div class="btnrow" style="margin-top:0;">
+          <button id="allPlayBtn" class="secondary" type="button">Play</button>
+          <button id="allPauseBtn" class="secondary" type="button" disabled>Pause</button>
+          <button id="allResetBtn" class="danger" type="button">Reset</button>
+                    <button id="allFitActiveBtn" class="secondary" type="button" title="Fit map to birds active at the current time">Fit active</button>
+          <button id="allFitAllBtn" class="secondary" type="button" title="Fit map to the full extent of all birds">Fit all</button>
+          <label class="pillMini" title="Auto-fit (turns off when you zoom/pan)"><input id="allAutoFit" type="checkbox" style="transform:translateY(1px);" checked> Auto-fit</label>
+<label class="pillMini" title="Loop the ALL animation"><input id="allLoop" type="checkbox" style="transform:translateY(1px);"> Loop</label>
+        </div>
+        <div class="btnrow" style="margin-top:0;">
+          <div class="pillMini" id="allStats">—</div>
+          <div class="pillMini" id="allTimeNow">Time: —</div>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div>
+          <label>Global progress (time-based)</label>
+          <input id="allProgress" type="range" min="0" max="1" step="0.001" value="0" />
+          <div class="miniNote" id="allProgressLabel">—</div>
+        </div>
+        <div>
+          <label>Global speed (very slow supported)</label>
+          <!-- MUCH SLOWER range -->
+          <input id="allSpeed" type="range" min="0.02" max="3" step="0.02" value="0.30" />
+          <div class="row" style="margin-top:8px;">
+            <div>
+              <label>Total duration (seconds)</label>
+              <!-- Default slower: 240s (4 minutes), can go up to 3600s -->
+              <input id="allDuration" type="number" min="10" max="3600" step="5" value="240" />
+            </div>
+            <div>
+              <label>Basemap</label>
+              <select id="allBasemapMirror"></select>
+            </div>
+          </div>
+          <div class="miniNote">Tip: for *very slow* playback, set Speed near 0.02 and Duration to 600–1800.</div>
+        </div>
+      </div>
+
+      <div class="miniNote">
+        Auto-fit is enabled by default. If you zoom/pan manually, auto-fit turns off so your view stays as you want.
+        Use “Fit active” (birds active at the current time) or “Fit all” (full extent).
+        Labels show each bird’s ID.
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="bgAudio" preload="auto" loop></audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+<script>
+(() => {
+  const el = (id) => document.getElementById(id);
+
+  // --- UI refs ---
+  const settingsCard = el("settingsCard");
+  const toggleSettingsBtn = el("toggleSettings");
+  const statusEl = el("status");
+
+  const fileInput = el("fileInput");
+  const loadExampleBtn = el("loadExampleBtn");
+  const delimiterEl = el("delimiter");
+  const hasHeaderEl = el("hasHeader");
+  const colIdEl = el("colId");
+  const colTimeEl = el("colTime");
+  const colLatEl = el("colLat");
+  const colLonEl = el("colLon");
+  const applyColsBtn = el("applyColsBtn");
+  const clearBtn = el("clearBtn");
+
+  const basemapSelectEl = el("basemapSelect");
+  const followZoomEl = el("followZoom");
+  const followModeEl = el("followMode");
+
+  const loopCurrentEl = el("loopCurrent");
+  const loopAllEl = el("loopAll");
+
+  // Playback
+  const birdSelect = el("birdSelect");
+  const showAllBtn = el("showAllBtn");
+  const animateAllBtn = el("animateAllBtn");
+
+  const playBtn = el("playBtn");
+  const pauseBtn = el("pauseBtn");
+  const resetBtn = el("resetBtn");
+  const speedEl = el("speed");
+  const legSecondsEl = el("legSeconds");
+  const holdSecondsEl = el("holdSeconds");
+  const timelineEl = el("timeline");
+  const timelineTimeEl = el("timelineTime");
+
+  const metaBird = el("metaBird");
+  const metaTime = el("metaTime");
+  const metaCoords = el("metaCoords");
+  const metaInfo = el("metaInfo");
+
+  // Music
+  const musicSelectEl = el("musicSelect");
+  const musicVolEl = el("musicVol");
+  const musicFileEl = el("musicFile");
+  const musicUploadRow= el("musicUploadRow");
+  const musicToggleBtn= el("musicToggle");
+  const musicAttribEl = el("musicAttribution");
+  const bgAudio = el("bgAudio");
+
+  // ALL modal
+  const allModal = el("allModal");
+  const allModalInner = el("allModalInner");
+  const allCloseBtn = el("allCloseBtn");
+  const allFullscreenBtn = el("allFullscreenBtn");
+  const allModalSub = el("allModalSub");
+  const allStatsEl = el("allStats");
+  const allTimeNowEl = el("allTimeNow");
+  const allTimeOverlayEl = el("allTimeOverlay");
+  const allPlayBtn = el("allPlayBtn");
+  const allPauseBtn = el("allPauseBtn");
+  const allResetBtn = el("allResetBtn");
+  const allFitActiveBtn = el("allFitActiveBtn");
+  const allFitAllBtn = el("allFitAllBtn");
+  const allAutoFitEl = el("allAutoFit");
+  const allLoopEl = el("allLoop");
+  const allProgressEl = el("allProgress");
+  const allProgressLabelEl = el("allProgressLabel");
+  const allSpeedEl = el("allSpeed");
+  const allDurationEl = el("allDuration");
+  const allBasemapMirrorEl = el("allBasemapMirror");
+
+  const setStatus = (msg) => { statusEl.textContent = msg; };
+
+  // --- Settings collapse ---
+  const setSettingsCollapsed = (collapsed) => {
+    settingsCard.classList.toggle("settingsCollapsed", collapsed);
+    toggleSettingsBtn.textContent = collapsed ? "Show" : "Hide";
+    refreshMapSizes();
+  };
+  toggleSettingsBtn.addEventListener("click", () => {
+    setSettingsCollapsed(!settingsCard.classList.contains("settingsCollapsed"));
+  });
+
+  loopAllEl.addEventListener("change", () => { if (loopAllEl.checked) loopCurrentEl.checked = false; });
+  loopCurrentEl.addEventListener("change", () => { if (loopCurrentEl.checked) loopAllEl.checked = false; });
+
+  // --- Music ---
+  let musicUploadURL = null;
+  const SAMPLE_MP3 = "https://upload.wikimedia.org/wikipedia/commons/transcoded/e/e8/Kevin_MacLeod_-_02_-_Meditation_Impromptu_02.ogg/Kevin_MacLeod_-_02_-_Meditation_Impromptu_02.ogg.mp3";
+  const SAMPLE_OGG = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Kevin_MacLeod_-_02_-_Meditation_Impromptu_02.ogg";
+
+  const clamp01 = (x) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
+  const setMusicToggleLabel = () => { musicToggleBtn.textContent = bgAudio.paused ? "Play music" : "Pause music"; };
+  const stopMusic = () => { try { bgAudio.pause(); } catch(e) {} try { bgAudio.currentTime = 0; } catch(e) {} setMusicToggleLabel(); };
+  const revokeMusicUpload = () => {
+    if (musicUploadURL) { try { URL.revokeObjectURL(musicUploadURL); } catch(e) {} musicUploadURL = null; }
+  };
+  const configureMusic = () => {
+    revokeMusicUpload();
+    stopMusic();
+    const mode = musicSelectEl.value;
+    bgAudio.volume = clamp01(parseFloat(musicVolEl.value || "0.35"));
+    bgAudio.loop = true;
+
+    if (mode === "off") {
+      musicUploadRow.style.display = "none";
+      musicToggleBtn.disabled = true;
+      musicAttribEl.textContent = "";
+      bgAudio.removeAttribute("src");
+      bgAudio.load();
+      return;
+    }
+    if (mode === "sample") {
+      musicUploadRow.style.display = "none";
+      musicToggleBtn.disabled = false;
+      bgAudio.src = SAMPLE_MP3;
+      bgAudio.onerror = () => { bgAudio.src = SAMPLE_OGG; bgAudio.load(); };
+      bgAudio.load();
+      musicAttribEl.textContent = "Sample: “Meditation Impromptu 02” — Kevin MacLeod. Licensed CC BY 3.0 (attribution required).";
+      return;
+    }
+    if (mode === "upload") {
+      musicUploadRow.style.display = "block";
+      const f = (musicFileEl && musicFileEl.files && musicFileEl.files[0]) ? musicFileEl.files[0] : null;
+      if (!f) {
+        musicToggleBtn.disabled = true;
+        musicAttribEl.textContent = "Upload an audio file to enable music.";
+        bgAudio.removeAttribute("src");
+        bgAudio.load();
+        return;
+      }
+      musicUploadURL = URL.createObjectURL(f);
+      bgAudio.src = musicUploadURL;
+      bgAudio.load();
+      musicToggleBtn.disabled = false;
+      musicAttribEl.textContent = `Local file: ${f.name}`;
+      return;
+    }
+  };
+  musicVolEl.addEventListener("input", () => { bgAudio.volume = clamp01(parseFloat(musicVolEl.value || "0.35")); });
+  musicSelectEl.addEventListener("change", configureMusic);
+  if (musicFileEl) musicFileEl.addEventListener("change", configureMusic);
+  musicToggleBtn.addEventListener("click", async () => {
+    try { if (bgAudio.paused) await bgAudio.play(); else bgAudio.pause(); } catch(e) {}
+    setMusicToggleLabel();
+  });
+  const tryStartMusic = async () => {
+    if (musicSelectEl.value === "off") return;
+    if (!bgAudio.src) return;
+    try { if (bgAudio.paused) await bgAudio.play(); } catch(e) {}
+    setMusicToggleLabel();
+  };
+  configureMusic();
+
+  // --- Maps (main + inset) ---
+  const followMap = L.map('mapFollow', { zoomControl: true, worldCopyJump: true }).setView([20, 0], 2);
+  const overviewMap = L.map('mapOverview', { zoomControl: false, worldCopyJump: true, attributionControl: false }).setView([20, 0], 2);
+
+  const baseDefs = {
+    osmStd: {
+      label: "OSM Standard (local labels)",
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      opts: { maxZoom: 19, subdomains: "abc", attribution: '&copy; OpenStreetMap contributors' }
+    },
+    osmDE: {
+      label: "OSM DE (Latin transliteration)",
+      url: "https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png",
+      opts: { maxZoom: 19, subdomains: "abc", attribution: '&copy; OpenStreetMap contributors (openstreetmap.de)' }
+    },
+    cartoPos: {
+      label: "CARTO Positron (light)",
+      url: "https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
+      opts: { maxZoom: 19, subdomains: "abcd", attribution: 'Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL.' }
+    },
+    cartoVoy: {
+      label: "CARTO Voyager (color)",
+      url: "https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+      opts: { maxZoom: 19, subdomains: "abcd", attribution: 'Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL.' }
+    },
+    opentopo: {
+      label: "OpenTopoMap",
+      url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+      opts: { maxZoom: 17, subdomains: "abc", attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap' }
+    }
+  };
+
+  const fillBasemapMirror = () => {
+    const opts = Object.entries(baseDefs).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("");
+    allBasemapMirrorEl.innerHTML = opts;
+    allBasemapMirrorEl.value = basemapSelectEl.value || "osmStd";
+  };
+  fillBasemapMirror();
+
+  let followBase = null;
+  let overviewBase = null;
+
+  const createBaseLayer = (key) => {
+    const def = baseDefs[key] || baseDefs.osmStd;
+    return L.tileLayer(def.url, def.opts);
+  };
+
+  const applyBasemapToMainMaps = (key) => {
+    try { if (followBase) followMap.removeLayer(followBase); } catch(e) {}
+    try { if (overviewBase) overviewMap.removeLayer(overviewBase); } catch(e) {}
+    followBase = createBaseLayer(key).addTo(followMap);
+    overviewBase = createBaseLayer(key).addTo(overviewMap);
+  };
+
+  basemapSelectEl.addEventListener("change", () => {
+    applyBasemapToMainMaps(basemapSelectEl.value);
+    allBasemapMirrorEl.value = basemapSelectEl.value;
+    if (allModal.classList.contains("show")) applyBasemapToAllMap(allBasemapMirrorEl.value);
+  });
+
+  applyBasemapToMainMaps(basemapSelectEl.value);
+
+  const overviewLine = L.polyline([], { weight: 3, opacity: 0.85 }).addTo(overviewMap);
+  const overviewMarker = L.circleMarker([0,0], { radius: 6, weight: 2, fillOpacity: 0.9 }).addTo(overviewMap);
+  const followLine = L.polyline([], { weight: 4, opacity: 0.90 }).addTo(followMap);
+  const followMarker = L.circleMarker([0,0], { radius: 7, weight: 2, fillOpacity: 0.9 }).addTo(followMap);
+
+  const allOverviewGroup = L.layerGroup().addTo(overviewMap);
+
+  const refreshMapSizes = () => {
+    requestAnimationFrame(() => {
+      try { followMap.invalidateSize(); } catch(e) {}
+      try { overviewMap.invalidateSize(); } catch(e) {}
+      try { if (allMap) allMap.invalidateSize(); } catch(e) {}
+    });
+  };
+  window.addEventListener("resize", refreshMapSizes);
+  setTimeout(refreshMapSizes, 100);
+
+  // --- Data ---
+  let rawRows = [];
+  let header = [];
+  const grouped = new Map(); // id -> points[]
+  let track = [];
+  let birdId = null;
+
+  // --- Animation state (single bird) ---
+  let playing = false;
+  let rafId = null;
+  let lastTs = null;
+  let segIndex = 0;
+  let segT = 0;     // [-1..1)
+  let followFixed = [];
+  let lastFollowMove = 0;
+
+  // Timeline scrub fix
+  let scrubActive = false;
+  let scrubWasPlaying = false;
+
+  // Helpers
+  const pad2 = (x) => String(x).padStart(2,"0");
+  const fmtTime = (d) => {
+    if (!d || isNaN(d.getTime())) return "—";
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  };
+
+  // Stronger datetime parsing (ISO, space-separated, slash formats, unix seconds/ms)
+  const parseDateLoose = (v) => {
+    if (v == null) return null;
+
+    // numbers: unix ms or unix seconds
+    if (typeof v === "number" && Number.isFinite(v)) {
+      const ms = (v > 1e12) ? v : v * 1000;
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    const s0 = String(v).trim();
+    if (!s0) return null;
+
+    // numeric strings
+    if (/^\d+(\.\d+)?$/.test(s0)) {
+      const num = parseFloat(s0);
+      if (Number.isFinite(num)) {
+        const ms = (num > 1e12) ? num : num * 1000;
+        const d = new Date(ms);
+        return isNaN(d.getTime()) ? null : d;
+      }
+    }
+
+    // ISO-8601 (works for: 2021-06-14T08:17:25.754Z)
+    const dIso = new Date(s0);
+    if (!isNaN(dIso.getTime())) return dIso;
+
+    // "YYYY-MM-DD HH:MM:SS(.ms)"  (assume UTC if no timezone)
+    // also supports "YYYY/MM/DD ..."
+    let m = s0.match(/^(\d{4})[-\/](\d{2})[-\/](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+    if (m) {
+      const [_, Y, Mo, D, h, mi, se="0", ms="0"] = m;
+      const ms3 = ms.padEnd(3, "0").slice(0,3);
+      // treat as UTC (common for GPS). If you prefer local, remove "Z".
+      const iso = `${Y}-${Mo}-${D}T${h}:${mi}:${se}.${ms3}Z`;
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // "DD/MM/YYYY HH:MM:SS" or "DD.MM.YYYY ..." (assume UTC)
+    m = s0.match(/^(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/);
+    if (m) {
+      const [_, D, Mo, Y, h="0", mi="0", se="0", ms="0"] = m;
+      const dd = String(D).padStart(2,"0");
+      const mm = String(Mo).padStart(2,"0");
+      const hh = String(h).padStart(2,"0");
+      const ms3 = String(ms).padEnd(3, "0").slice(0,3);
+      const iso = `${Y}-${mm}-${dd}T${hh}:${mi}:${se}.${ms3}Z`;
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // As a last try: replace space with T and add Z
+    const s2 = s0.replace(" ", "T");
+    const dUtc = new Date(s2 + "Z");
+    if (!isNaN(dUtc.getTime())) return dUtc;
+
+    return null;
+  };
+
+  const lerp = (a,b,t) => a + (b-a)*t;
+  const lerpLonShortest = (lon1, lon2, t) => {
+    let d = lon2 - lon1;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    let lon = lon1 + d * t;
+    lon = ((lon + 180) % 360 + 360) % 360 - 180;
+    return lon;
+  };
+
+  const colorForId = (id) => {
+    let h = 0;
+    const s = String(id || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return `hsl(${h % 360}, 70%, 55%)`;
+  };
+
+  const clearMaps = () => {
+    overviewLine.setLatLngs([]);
+    followLine.setLatLngs([]);
+    overviewMarker.setLatLng([0,0]);
+    followMarker.setLatLng([0,0]);
+    followFixed = [];
+    try { allOverviewGroup.clearLayers(); } catch(e) {}
+  };
+
+  const stopAnim = () => {
+    playing = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    lastTs = null;
+  };
+
+  const enablePlaybackControls = (enabled) => {
+    playBtn.disabled = !enabled;
+    pauseBtn.disabled = true;
+    resetBtn.disabled = !enabled;
+    speedEl.disabled = !enabled;
+    legSecondsEl.disabled = !enabled;
+    holdSecondsEl.disabled = !enabled;
+    timelineEl.disabled = !enabled;
+  };
+
+  const idsSorted = () => Array.from(grouped.keys()).sort();
+
+  // Follow behavior
+  const maybeMoveFollowMap = (lat, lon, ts) => {
+    const z = Math.max(2, Math.min(18, parseInt(followZoomEl.value||"12",10)));
+    const mode = followModeEl.value || "edge";
+    const minIntervalMs = 140;
+    if (ts - lastFollowMove < minIntervalMs) return;
+
+    if (mode === "always") {
+      followMap.setView([lat, lon], z, { animate: false });
+      lastFollowMove = ts;
+      return;
+    }
+    const padded = followMap.getBounds().pad(-0.25);
+    if (!padded.contains([lat, lon])) {
+      followMap.setView([lat, lon], z, { animate: false });
+      lastFollowMove = ts;
+    }
+  };
+
+  const renderFrame = (i, t, ts) => {
+    const a = track[i];
+    const b = track[i+1] || track[i];
+
+    const lat = lerp(a.lat, b.lat, t);
+    const lon = lerpLonShortest(a.lon, b.lon, t);
+
+    overviewMarker.setLatLng([lat, lon]);
+    followMarker.setLatLng([lat, lon]);
+
+    followLine.setLatLngs(followFixed.concat([[lat, lon]]));
+    maybeMoveFollowMap(lat, lon, ts);
+
+    let curTime = null;
+    if (a.dt && b.dt) {
+      const ta = a.dt.getTime();
+      const tb = b.dt.getTime();
+      curTime = new Date(ta + (tb - ta) * t);
+    } else if (a.dt) curTime = a.dt;
+
+    metaCoords.textContent = `Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    metaTime.textContent = `Time: ${fmtTime(curTime)}`;
+    timelineTimeEl.textContent = `Time: ${fmtTime(curTime)}`;
+  };
+
+  const restartCurrentBird = () => {
+    segIndex = 0;
+    segT = -1;
+    lastTs = null;
+    lastFollowMove = 0;
+
+    const start = [track[0].lat, track[0].lon];
+    overviewMarker.setLatLng(start);
+    followMarker.setLatLng(start);
+
+    followFixed = [start];
+    followLine.setLatLngs([start]);
+
+    metaCoords.textContent = `Lat/Lon: ${track[0].lat.toFixed(5)}, ${track[0].lon.toFixed(5)}`;
+    metaTime.textContent = `Time: ${fmtTime(track[0].dt)}`;
+    timelineTimeEl.textContent = `Time: ${fmtTime(track[0].dt)}`;
+
+    const z = Math.max(2, Math.min(18, parseInt(followZoomEl.value||"12",10)));
+    followMap.setView(start, z, { animate:false });
+
+    timelineEl.min = "0";
+    timelineEl.max = String(track.length - 1);
+    timelineEl.step = "0.001";
+    timelineEl.value = "0";
+  };
+
+  const advanceToNextBirdAndPlay = async () => {
+    const ids = idsSorted();
+    if (!ids.length) return;
+    let idx = ids.indexOf(birdId);
+    if (idx < 0) idx = 0;
+    const nextId = ids[(idx + 1) % ids.length];
+    setStatus(`Finished ${birdId}. Switching to ${nextId}…`);
+    await loadTrackFor(nextId, {autoplay:true});
+  };
+
+  const tick = (ts) => {
+    if (!playing) return;
+    if (lastTs == null) lastTs = ts;
+    const dtMs = ts - lastTs;
+    lastTs = ts;
+
+    const speed = parseFloat(speedEl.value || "1");
+    const legSeconds = Math.max(0.1, parseFloat(legSecondsEl.value || "3.0"));
+    const holdSeconds = Math.max(0.0, parseFloat(holdSecondsEl.value || "1.0"));
+
+    if (segT < 0) {
+      if (holdSeconds <= 0.0001) segT = 0;
+      else {
+        segT += (dtMs/1000) * speed / holdSeconds;
+        if (segT >= 0) segT = 0;
+      }
+      renderFrame(segIndex, 0, ts);
+      if (!scrubActive) timelineEl.value = String(segIndex);
+      rafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    segT += (dtMs/1000) * speed / legSeconds;
+
+    if (segT >= 1) {
+      renderFrame(segIndex, 1, ts);
+
+      const end = track[segIndex+1];
+      followFixed.push([end.lat, end.lon]);
+      followLine.setLatLngs(followFixed);
+
+      segIndex += 1;
+      segT = -1;
+
+      if (!scrubActive) timelineEl.value = String(segIndex);
+
+      if (segIndex >= track.length - 1) {
+        if (loopAllEl.checked) {
+          stopAnim();
+          playBtn.disabled = true;
+          pauseBtn.disabled = true;
+          advanceToNextBirdAndPlay();
+          return;
+        }
+        if (loopCurrentEl.checked) {
+          setStatus(`Looping ${birdId}…`);
+          restartCurrentBird();
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+        stopAnim();
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+        setStatus(`Finished animation for ${birdId}.`);
+        return;
+      }
+
+      rafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    renderFrame(segIndex, segT, ts);
+    if (!scrubActive) timelineEl.value = String(segIndex + segT);
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const resumePlayback = async () => {
+    if (!track || track.length < 2) return;
+    playing = true;
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    lastTs = null;
+    await tryStartMusic();
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const startPlayback = async () => {
+    if (!track || track.length < 2) return;
+    playing = true;
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    lastTs = null;
+    await tryStartMusic();
+    rafId = requestAnimationFrame(tick);
+  };
+
+  playBtn.addEventListener("click", startPlayback);
+  pauseBtn.addEventListener("click", () => {
+    stopAnim();
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+  });
+  resetBtn.addEventListener("click", () => {
+    stopAnim();
+    if (!track.length) return;
+    restartCurrentBird();
+    playBtn.disabled = (track.length < 2);
+    pauseBtn.disabled = true;
+  });
+
+  // --- Timeline scrub: keep anim going automatically after release ---
+  const beginScrub = () => {
+    scrubActive = true;
+    scrubWasPlaying = playing;
+    if (playing) {
+      stopAnim();
+      playBtn.disabled = false;
+      pauseBtn.disabled = true;
+    }
+  };
+  const endScrub = async () => {
+    if (!scrubActive) return;
+    scrubActive = false;
+    if (scrubWasPlaying) {
+      scrubWasPlaying = false;
+      await resumePlayback();
+    }
+  };
+
+  timelineEl.addEventListener("pointerdown", beginScrub);
+  timelineEl.addEventListener("pointerup", endScrub);
+  timelineEl.addEventListener("pointercancel", endScrub);
+
+  timelineEl.addEventListener("mousedown", beginScrub);
+  timelineEl.addEventListener("touchstart", beginScrub, {passive:true});
+  document.addEventListener("mouseup", endScrub);
+  document.addEventListener("touchend", endScrub, {passive:true});
+
+  timelineEl.addEventListener("input", () => {
+    if (!track || track.length < 2) return;
+
+    const v = Math.max(0, Math.min(track.length - 1, parseFloat(timelineEl.value || "0")));
+    const i = Math.floor(v);
+    const t = v - i;
+
+    segIndex = Math.min(i, track.length - 2);
+    segT = t;
+
+    followFixed = track.slice(0, segIndex+1).map(p => [p.lat, p.lon]);
+    followLine.setLatLngs(followFixed);
+
+    renderFrame(segIndex, segT, performance.now());
+  });
+
+  // --- Show ALL (static) in inset map ---
+  const showAllStatic = () => {
+    stopAnim();
+    clearMaps();
+
+    const ids = idsSorted();
+    if (!ids.length) {
+      setStatus("No birds found. Parse a file first.");
+      return;
+    }
+
+    let totalPts = 0;
+    let bounds = null;
+
+    for (const id of ids) {
+      const pts = grouped.get(id) || [];
+      const latlngs = pts.map(p => [p.lat, p.lon]);
+      if (latlngs.length < 1) continue;
+
+      totalPts += latlngs.length;
+      const c = colorForId(id);
+
+      const line = L.polyline(latlngs, { weight: 2.5, opacity: 0.75, color: c }).addTo(allOverviewGroup);
+      line.on("click", () => loadTrackFor(id, {autoplay:false}));
+
+      const last = latlngs[latlngs.length - 1];
+      const m = L.circleMarker(last, { radius: 5, weight: 2, fillOpacity: 0.85, color: c }).addTo(allOverviewGroup);
+      m.bindTooltip(id, { direction: "top", offset: [0, -6] });
+      m.on("click", () => loadTrackFor(id, {autoplay:false}));
+
+      bounds = bounds ? bounds.extend(line.getBounds()) : line.getBounds();
+    }
+
+    if (bounds) overviewMap.fitBounds(bounds, { padding: [12, 12] });
+
+    metaBird.textContent = "Bird: ALL (static)";
+    metaTime.textContent = "Time: —";
+    metaCoords.textContent = "Lat/Lon: —";
+    metaInfo.textContent = `Points used: ${totalPts} (all birds)`;
+    timelineTimeEl.textContent = "—";
+
+    enablePlaybackControls(false);
+    setStatus(`Showing ALL birds (static): ${ids.length} individuals, ${totalPts} points.\nTip: click a line or marker to load that bird.`);
+    refreshMapSizes();
+  };
+
+  showAllBtn.addEventListener("click", showAllStatic);
+
+  // --- Load track for a bird ---
+  const loadTrackFor = async (id, {autoplay=false} = {}) => {
+    if (!id || !grouped.has(id)) return;
+
+    stopAnim();
+    clearMaps();
+
+    birdId = id;
+    track = (grouped.get(id) || []).map(p => ({...p}));
+
+    metaBird.textContent = `Bird: ${birdId}`;
+    metaInfo.textContent = `Points used: ${track.length}`;
+
+    if (track.length < 1) {
+      enablePlaybackControls(false);
+      setStatus(`Loaded bird ${id}, but no valid points.`);
+      return;
+    }
+
+    const start = [track[0].lat, track[0].lon];
+    const latlngs = track.map(p => [p.lat, p.lon]);
+
+    overviewLine.setLatLngs(latlngs);
+    overviewMarker.setLatLng(start);
+    if (track.length >= 2) overviewMap.fitBounds(latlngs, { padding: [12,12] });
+    else overviewMap.setView(start, 3);
+
+    const z = Math.max(2, Math.min(18, parseInt(followZoomEl.value||"12",10)));
+    followMap.setView(start, z, { animate:false });
+
+    followMarker.setLatLng(start);
+    followFixed = [start];
+    followLine.setLatLngs([start]);
+
+    segIndex = 0;
+    segT = -1;
+    lastTs = null;
+    lastFollowMove = 0;
+
+    metaCoords.textContent = `Lat/Lon: ${track[0].lat.toFixed(5)}, ${track[0].lon.toFixed(5)}`;
+    metaTime.textContent = `Time: ${fmtTime(track[0].dt)}`;
+    timelineTimeEl.textContent = `Time: ${fmtTime(track[0].dt)}`;
+
+    enablePlaybackControls(track.length >= 2);
+    playBtn.disabled = track.length < 2;
+    resetBtn.disabled = false;
+
+    timelineEl.min = "0";
+    timelineEl.max = String(track.length - 1);
+    timelineEl.step = "0.001";
+    timelineEl.value = "0";
+
+    setStatus(`Loaded bird ${id}. Points: ${track.length}\nUse Timeline or press Play for automatic animation.`);
+    refreshMapSizes();
+
+    if (autoplay && track.length >= 2) await startPlayback();
+  };
+
+  birdSelect.addEventListener("change", async () => {
+    const id = birdSelect.value;
+    if (!id) return;
+    await loadTrackFor(id, {autoplay:false});
+  });
+
+  // --- CSV parsing / column selection ---
+  const setColsEnabled = (enabled) => {
+    colIdEl.disabled = !enabled;
+    colTimeEl.disabled = !enabled;
+    colLatEl.disabled = !enabled;
+    colLonEl.disabled = !enabled;
+    applyColsBtn.disabled = !enabled;
+    clearBtn.disabled = !enabled;
+  };
+
+  const fillColSelects = (cols) => {
+    const opts = ['<option value="">—</option>'].concat(
+      cols.map((c, idx) => `<option value="${idx}">${String(c)}</option>`)
+    ).join("");
+    colIdEl.innerHTML = opts;
+    colTimeEl.innerHTML = opts;
+    colLatEl.innerHTML = opts;
+    colLonEl.innerHTML = opts;
+  };
+
+  const normalizeHeader = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const autoGuess = (cols) => {
+    const norm = cols.map(c => normalizeHeader(c));
+
+    const findOne = (cands) => {
+      for (const cand of cands) {
+        const idx = norm.indexOf(cand);
+        if (idx >= 0) return idx;
+      }
+      // contains-match fallback
+      for (const cand of cands) {
+        const idx = norm.findIndex(x => x.includes(cand));
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+
+    // your example: UID, Transmitting time, Collecting time, Longitude, Latitude...
+    const idIdx   = findOne(["uid","id","bird id","bird_id","individual","tag","time_agg","stork id","animal id"]);
+    const latIdx  = findOne(["latitude","lat","y"]);
+    const lonIdx  = findOne(["longitude","lon","lng","x"]);
+    const timeIdx = findOne([
+      "collecting time","transmitting time","datetime","timestamp","time","date time","gps time","date"
+    ]);
+
+    if (idIdx >= 0) colIdEl.value = String(idIdx);
+    if (latIdx >= 0) colLatEl.value = String(latIdx);
+    if (lonIdx >= 0) colLonEl.value = String(lonIdx);
+    if (timeIdx >= 0) colTimeEl.value = String(timeIdx);
+  };
+
+  const resetAll = () => {
+    stopAnim();
+    clearMaps();
+
+    rawRows = [];
+    header = [];
+    grouped.clear();
+
+    track = [];
+    birdId = null;
+
+    birdSelect.innerHTML = `<option value="">—</option>`;
+    birdSelect.disabled = true;
+    showAllBtn.disabled = true;
+    animateAllBtn.disabled = true;
+
+    enablePlaybackControls(false);
+
+    metaBird.textContent = "Bird: —";
+    metaTime.textContent = "Time: —";
+    metaCoords.textContent = "Lat/Lon: —";
+    metaInfo.textContent = "Points used: —";
+    timelineTimeEl.textContent = "—";
+
+    setColsEnabled(false);
+    setStatus("Select a CSV file to begin.");
+  };
+
+  clearBtn.addEventListener("click", () => {
+    fileInput.value = "";
+    resetAll();
+  });
+
+  // --- CSV parsing helpers (file + example URL) ---
+  const handleParsedCSV = (res, hasHeader) => {
+    if (!res || !res.data || res.data.length === 0) {
+      setStatus("No rows found (empty file?).");
+      return false;
+    }
+
+    if (hasHeader) {
+      header = (res.meta && res.meta.fields) ? res.meta.fields : Object.keys(res.data[0] || {});
+      rawRows = res.data;
+    } else {
+      const maxLen = Math.max(...res.data.map(r => Array.isArray(r) ? r.length : 0));
+      header = Array.from({length:maxLen}, (_,i) => String.fromCharCode(65+i)); // A, B, C...
+      rawRows = res.data.map(arr => {
+        const obj = {};
+        for (let i=0; i<maxLen; i++) obj[header[i]] = (arr && arr[i] != null) ? arr[i] : "";
+        return obj;
+      });
+    }
+
+    fillColSelects(header);
+    autoGuess(header);
+    setColsEnabled(true);
+
+    setStatus(
+      `Parsed rows: ${rawRows.length}\n` +
+      `Now select columns (ID, datetime, lat, lon) and click “Apply columns”.\n\n` +
+      `Tip: your example “UID / Collecting time / Longitude / Latitude” is supported.`
+    );
+
+    return true;
+  };
+
+  const parseCSVFrom = (source, { label = "file", autoApply = false } = {}) => {
+    const delim = delimiterEl.value === "\\t" ? "\t" : delimiterEl.value;
+    const hasHeader = hasHeaderEl.value === "yes";
+
+    setStatus(`Parsing ${label}…`);
+
+    Papa.parse(source, {
+      download: (typeof source === "string"), // URL (example) vs File
+      header: hasHeader,
+      dynamicTyping: false,
+      skipEmptyLines: true,
+      delimiter: delim,
+      complete: async (res) => {
+        const ok = handleParsedCSV(res, hasHeader);
+        if (!ok) return;
+
+        // For the example dataset, auto-apply guessed columns and load the first ID.
+        if (autoApply) {
+          const built = buildGroups();
+          if (built) {
+            const ids = idsSorted();
+            if (ids.length) {
+              birdSelect.value = ids[0];
+              await loadTrackFor(ids[0], { autoplay: false });
+            }
+          }
+        }
+      },
+      error: (err) => {
+        setStatus("Parse error: " + (err && err.message ? err.message : String(err)));
+      }
+    });
+  };
+
+  fileInput.addEventListener("change", () => {
+    resetAll();
+    const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+    if (!file) return;
+    parseCSVFrom(file, { label: "file", autoApply: false });
+  });
+
+  // Example data (for GitHub Pages / repository demo)
+  if (loadExampleBtn) {
+    loadExampleBtn.addEventListener("click", () => {
+      fileInput.value = ""; // keep UI consistent
+      resetAll();
+      parseCSVFrom("example_data.csv", { label: "example data", autoApply: true });
+    });
+  }
+
+  // Optional: auto-load example when URL contains ?demo=1 or ?example=1
+  window.addEventListener("DOMContentLoaded", () => {
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("demo") === "1" || qs.get("example") === "1") {
+      if (loadExampleBtn) loadExampleBtn.click();
+    }
+  });
+
+  const buildGroups = () => {
+    grouped.clear();
+
+    const idIdx = parseInt(colIdEl.value, 10);
+    const timeIdx = parseInt(colTimeEl.value, 10);
+    const latIdx = parseInt(colLatEl.value, 10);
+    const lonIdx = parseInt(colLonEl.value, 10);
+
+    if ([idIdx,timeIdx,latIdx,lonIdx].some(v => isNaN(v))) {
+      setStatus("Please select ALL columns (ID, datetime, lat, lon).");
+      return false;
+    }
+
+    const idKey = header[idIdx];
+    const timeKey = header[timeIdx];
+    const latKey = header[latIdx];
+    const lonKey = header[lonIdx];
+
+    let used = 0;
+    let timed = 0;
+
+    for (let i=0; i<rawRows.length; i++) {
+      const r = rawRows[i] || {};
+      const id = String(r[idKey] ?? "").trim();
+      const lat = parseFloat(String(r[latKey] ?? "").trim());
+      const lon = parseFloat(String(r[lonKey] ?? "").trim());
+      const dt = parseDateLoose(r[timeKey]);
+
+      if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+
+      if (!grouped.has(id)) grouped.set(id, []);
+      grouped.get(id).push({ dt, lat, lon, rowIndex: i+1 });
+
+      used++;
+      if (dt && !isNaN(dt.getTime())) timed++;
+    }
+
+    // sort by datetime if present
+    for (const [id, arr] of grouped.entries()) {
+      arr.sort((a, b) => {
+        const ta = a.dt ? a.dt.getTime() : Infinity;
+        const tb = b.dt ? b.dt.getTime() : Infinity;
+        if (ta !== tb) return ta - tb;
+        return a.rowIndex - b.rowIndex;
+      });
+    }
+
+    const ids = idsSorted();
+    birdSelect.innerHTML =
+      `<option value="">— select —</option>` +
+      ids.map(id => `<option value="${id}">${id} (${grouped.get(id).length} points)</option>`).join("");
+    birdSelect.disabled = ids.length === 0;
+
+    showAllBtn.disabled = ids.length === 0;
+    animateAllBtn.disabled = ids.length === 0;
+
+    setStatus(
+      `Applied columns.\n` +
+      `- Rows parsed: ${rawRows.length}\n` +
+      `- Usable points: ${used}\n` +
+      `- Points with valid datetime: ${timed}\n` +
+      `- Individuals detected: ${ids.length}\n\n` +
+      `Pick a bird in Playback (visible even when Settings are hidden).`
+    );
+
+    metaInfo.textContent = `Points used: ${used}`;
+    refreshMapSizes();
+    return true;
+  };
+
+  applyColsBtn.addEventListener("click", () => {
+    stopAnim();
+    clearMaps();
+    track = [];
+    birdId = null;
+    enablePlaybackControls(false);
+    metaBird.textContent = "Bird: —";
+    metaTime.textContent = "Time: —";
+    metaCoords.textContent = "Lat/Lon: —";
+    timelineTimeEl.textContent = "—";
+
+    buildGroups();
+  });
+
+  // ---- ALL animation modal (TIME-BASED + auto zoom + labels) ----
+  let allMap = null;
+  let allBase = null;
+  let allLayerGroup = null;
+
+  let allItems = []; // {id, coords[], timesMs[], poly, marker}
+  let allPlaying = false;
+  let allRaf = null;
+  let allLastTs = null;
+  let allProgress = 0;      // 0..1
+  let allMinMs = null;
+  let allMaxMs = null;
+  let allLastFitAt = 0;
+  // --- ALL map fit / auto-fit controls ---
+  const ALL_MAX_FIT_ZOOM = 11;  // prevents "too close" zoom when only 1 bird/point is active
+  const ALL_POINT_ZOOM   = 7;
+
+  let allAutoFit = true;        // auto-fit follows active birds (turns off on user zoom/pan)
+  let allProgrammaticMove = false;
+  let allAllBounds = null;      // full extent of all birds (all points)
+  let allLastActiveBounds = null;
+  let allLastActiveCount = 0;
+
+  const setAllAutoFit = (v) => {
+    allAutoFit = !!v;
+    if (allAutoFitEl) allAutoFitEl.checked = allAutoFit;
+  };
+
+  const isPointBounds = (b) => {
+    if (!b || !b.isValid || !b.isValid()) return true;
+    const ne = b.getNorthEast();
+    const sw = b.getSouthWest();
+    return (Math.abs(ne.lat - sw.lat) < 1e-10) && (Math.abs(ne.lng - sw.lng) < 1e-10);
+  };
+
+  const doProgrammaticMove = (cb) => {
+    if (!allMap) return;
+    allProgrammaticMove = true;
+    try { cb(); } catch(e) {}
+    const clear = () => { allProgrammaticMove = false; };
+    // clear on first move/zoom end, plus a small timeout fallback
+    allMap.once("moveend", clear);
+    allMap.once("zoomend", clear);
+    setTimeout(clear, 350);
+  };
+
+  const safeFitAllMap = (bounds, { padding=[30,30], maxZoom=ALL_MAX_FIT_ZOOM, pointZoom=ALL_POINT_ZOOM } = {}) => {
+    if (!allMap || !bounds) return;
+    if (isPointBounds(bounds)) {
+      const c = bounds.getCenter ? bounds.getCenter() : null;
+      if (!c) return;
+      doProgrammaticMove(() => allMap.setView(c, Math.min(maxZoom, pointZoom), { animate:false }));
+      return;
+    }
+    doProgrammaticMove(() => allMap.fitBounds(bounds, { padding, animate:false, maxZoom }));
+  };
+
+  const fitAllToActiveNow = () => {
+    if (!allMap || !allLastActiveBounds || !allLastActiveBounds.isValid || !allLastActiveBounds.isValid()) return;
+    if (allLastActiveCount <= 1) {
+      const c = allLastActiveBounds.getCenter();
+      // center + cap zoom, but don't zoom in beyond ALL_MAX_FIT_ZOOM
+      const z = Math.min(allMap.getZoom() || ALL_POINT_ZOOM, ALL_MAX_FIT_ZOOM);
+      doProgrammaticMove(() => allMap.setView(c, z, { animate:false }));
+      return;
+    }
+    safeFitAllMap(allLastActiveBounds.pad(0.18), { padding:[30,30], maxZoom:ALL_MAX_FIT_ZOOM });
+  };
+
+  const fitAllToAllBounds = () => {
+    if (!allMap || !allAllBounds || !allAllBounds.isValid || !allAllBounds.isValid()) return;
+    safeFitAllMap(allAllBounds.pad(0.05), { padding:[20,20], maxZoom:ALL_MAX_FIT_ZOOM });
+  };
+
+
+  const stopAllAnim = () => {
+    allPlaying = false;
+    if (allRaf) cancelAnimationFrame(allRaf);
+    allRaf = null;
+    allLastTs = null;
+    allPlayBtn.disabled = false;
+    allPauseBtn.disabled = true;
+  };
+
+  const applyBasemapToAllMap = (key) => {
+    if (!allMap) return;
+    try { if (allBase) allMap.removeLayer(allBase); } catch(e) {}
+    allBase = createBaseLayer(key).addTo(allMap);
+  };
+
+  const openAllModal = () => {
+    const ids = idsSorted();
+    if (!ids.length) return;
+
+    allModal.classList.add("show");
+
+    // Reset fullscreen state on open
+    try { if (allModalInner) allModalInner.classList.remove("fullscreen"); } catch(e) {}
+    try { if (allFullscreenBtn) allFullscreenBtn.textContent = "Fullscreen"; } catch(e) {}
+    fillBasemapMirror();
+    allBasemapMirrorEl.value = basemapSelectEl.value || "osmStd";
+
+    if (!allMap) {
+      allMap = L.map("allMap", { zoomControl:true, worldCopyJump:true }).setView([20,0], 2);
+      allLayerGroup = L.layerGroup().addTo(allMap);
+      applyBasemapToAllMap(allBasemapMirrorEl.value);
+    } else {
+      applyBasemapToAllMap(allBasemapMirrorEl.value);
+      try { allLayerGroup.clearLayers(); } catch(e) {}
+    }
+
+    // Auto-fit starts ON each time you open the ALL panel
+    setAllAutoFit(true);
+
+    // If the user zooms/pans manually, turn auto-fit off (so the view doesn't keep snapping back)
+    if (allMap && !allMap.__allAutoFitHooked) {
+      allMap.__allAutoFitHooked = true;
+      const userDisables = () => { if (!allProgrammaticMove) setAllAutoFit(false); };
+      allMap.on("dragstart", userDisables);
+      allMap.on("zoomstart", userDisables);
+      allMap.on("movestart", userDisables);
+    }
+
+    allItems = [];
+    allMinMs = null;
+    allMaxMs = null;
+
+    let totalPts = 0;
+
+    for (const id of ids) {
+      const pts = grouped.get(id) || [];
+
+      // keep only points with valid datetime
+      const coords = [];
+      const times = [];
+      for (const p of pts) {
+        if (!p.dt || isNaN(p.dt.getTime())) continue;
+        coords.push([p.lat, p.lon]);
+        times.push(p.dt.getTime());
+      }
+
+      if (times.length < 2) continue; // need time interpolation
+      totalPts += times.length;
+
+      allMinMs = (allMinMs == null) ? times[0] : Math.min(allMinMs, times[0]);
+      allMaxMs = (allMaxMs == null) ? times[times.length-1] : Math.max(allMaxMs, times[times.length-1]);
+
+      const c = colorForId(id);
+
+      const poly = L.polyline([coords[0]], { weight: 3, opacity: 0.85, color: c }).addTo(allLayerGroup);
+      const marker = L.circleMarker(coords[0], { radius: 5, weight: 2, fillOpacity: 0.9, color: c }).addTo(allLayerGroup);
+      marker.bindTooltip(id, { permanent:true, direction:"right", offset:[8,0], opacity:0.9, className:"idLabel" });
+
+      allItems.push({ id, coords, times, poly, marker, n: times.length });
+    }
+
+    const nBirds = allItems.length;
+    if (!nBirds || allMinMs == null || allMaxMs == null || allMaxMs <= allMinMs) {
+      allModalSub.textContent = `No usable datetime (need at least 2 dated points per bird).`;
+      allStatsEl.textContent = `0 birds`;
+      allTimeNowEl.textContent = `Time: —`;
+      allTimeOverlayEl.textContent = `Time: —`;
+      stopAllAnim();
+      refreshMapSizes();
+      return;
+    }
+
+    // Compute full extent across ALL points (not just start points)
+    allAllBounds = null;
+    for (const it of allItems) {
+      for (const c of it.coords) {
+        const ll = L.latLng(c[0], c[1]);
+        allAllBounds = allAllBounds ? allAllBounds.extend(ll) : L.latLngBounds(ll, ll);
+      }
+    }
+    // Initial view: fit everything, but cap max zoom so a single-id/single-point file doesn't zoom in too far
+    if (allAllBounds) safeFitAllMap(allAllBounds, { padding:[20,20], maxZoom: ALL_MAX_FIT_ZOOM, pointZoom: ALL_POINT_ZOOM });
+allProgress = 0;
+    allProgressEl.value = "0";
+    allLastFitAt = 0;
+
+    const rangeStr = `${fmtTime(new Date(allMinMs))} → ${fmtTime(new Date(allMaxMs))}`;
+    allModalSub.textContent = `${nBirds} individuals • ${rangeStr}`;
+    allStatsEl.textContent = `${nBirds} birds • ${totalPts} timed pts`;
+
+    updateAllRender(true);
+    stopAllAnim();
+    refreshMapSizes();
+  };
+
+  const closeAllModal = () => {
+    stopAllAnim();
+    allModal.classList.remove("show");
+    try { if (allModalInner) allModalInner.classList.remove("fullscreen"); } catch(e) {}
+    try { if (allFullscreenBtn) allFullscreenBtn.textContent = "Fullscreen"; } catch(e) {}
+    refreshMapSizes();
+  };
+
+  allCloseBtn.addEventListener("click", closeAllModal);
+
+  // Fullscreen toggle for ALL panel
+  const setAllFullscreen = (fs) => {
+    try { if (allModalInner) allModalInner.classList.toggle("fullscreen", !!fs); } catch(e) {}
+    try { if (allFullscreenBtn) allFullscreenBtn.textContent = fs ? "Exit full screen" : "Fullscreen"; } catch(e) {}
+    refreshMapSizes();
+  };
+  if (allFullscreenBtn) allFullscreenBtn.addEventListener("click", () => {
+    const fs = allModalInner && allModalInner.classList.contains("fullscreen");
+    setAllFullscreen(!fs);
+  });
+
+  allModal.addEventListener("click", (e) => { if (e.target === allModal) closeAllModal(); });
+
+  // Fit / auto-fit controls
+  if (allAutoFitEl) allAutoFitEl.addEventListener("change", () => setAllAutoFit(allAutoFitEl.checked));
+  if (allFitActiveBtn) allFitActiveBtn.addEventListener("click", () => fitAllToActiveNow());
+  if (allFitAllBtn) allFitAllBtn.addEventListener("click", () => fitAllToAllBounds());
+
+  allBasemapMirrorEl.addEventListener("change", () => {
+    basemapSelectEl.value = allBasemapMirrorEl.value;
+    applyBasemapToMainMaps(basemapSelectEl.value);
+    applyBasemapToAllMap(allBasemapMirrorEl.value);
+  });
+
+  const findSegment = (times, tMs) => {
+    let lo = 0;
+    let hi = times.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid] <= tMs) lo = mid;
+      else hi = mid;
+    }
+    const ta = times[lo];
+    const tb = times[lo+1];
+    const frac = (tb === ta) ? 0 : (tMs - ta) / (tb - ta);
+    return { i: lo, t: Math.max(0, Math.min(1, frac)) };
+  };
+
+  const updateAllRender = (forceFit=false) => {
+    if (!allItems.length || allMinMs == null || allMaxMs == null) return;
+
+    const tNowMs = allMinMs + allProgress * (allMaxMs - allMinMs);
+    const tStr = fmtTime(new Date(tNowMs));
+    allTimeNowEl.textContent = `Time: ${tStr}`;
+    allTimeOverlayEl.textContent = `Time: ${tStr}`;
+
+    const pct = Math.round(allProgress * 100);
+    allProgressLabelEl.textContent = `Progress: ${pct}%`;
+
+    let activeBounds = null;
+    let activeCount = 0;
+
+    for (const it of allItems) {
+      const t0 = it.times[0];
+      const t1 = it.times[it.times.length - 1];
+
+      if (tNowMs < t0 || tNowMs > t1) {
+        it.poly.setLatLngs([]);
+        it.marker.setStyle({ opacity: 0, fillOpacity: 0 });
+        continue;
+      }
+
+      const seg = findSegment(it.times, tNowMs);
+      const a = it.coords[seg.i];
+      const b = it.coords[seg.i + 1];
+
+      const lat = a[0] + (b[0] - a[0]) * seg.t;
+
+      let lon1 = a[1], lon2 = b[1];
+      let d = lon2 - lon1;
+      if (d > 180) d -= 360;
+      if (d < -180) d += 360;
+      let lon = lon1 + d * seg.t;
+      lon = ((lon + 180) % 360 + 360) % 360 - 180;
+
+      const partial = it.coords.slice(0, seg.i + 1);
+      partial.push([lat, lon]);
+
+      it.poly.setLatLngs(partial);
+      it.marker.setLatLng([lat, lon]);
+      it.marker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+
+      activeCount += 1;
+      const ll = L.latLng(lat, lon);
+      activeBounds = activeBounds ? activeBounds.extend(ll) : L.latLngBounds(ll, ll);
+    }
+
+    // remember what is active now (so the "Fit active" button can use it)
+    allLastActiveBounds = activeBounds;
+    allLastActiveCount = activeCount;
+
+    const now = performance.now();
+    const throttleMs = 450;
+
+    // Auto-fit only when enabled. If the user zooms/pans, auto-fit is turned off.
+    if (allMap && activeBounds && allAutoFit && (forceFit || (now - allLastFitAt > throttleMs))) {
+      if (activeCount <= 1) {
+        // Single active bird: center only (don't keep changing zoom)
+        doProgrammaticMove(() => allMap.panTo(activeBounds.getCenter(), { animate:false }));
+      } else {
+        safeFitAllMap(activeBounds.pad(0.18), { padding:[30,30], maxZoom: ALL_MAX_FIT_ZOOM });
+      }
+      allLastFitAt = now;
+    }
+
+    allStatsEl.textContent = `${activeCount} birds now • ${allItems.length} total`;
+  };
+
+  const allTick = (ts) => {
+    if (!allPlaying) return;
+    if (allLastTs == null) allLastTs = ts;
+    const dtSec = Math.max(0, (ts - allLastTs) / 1000);
+    allLastTs = ts;
+
+    const speed = parseFloat(allSpeedEl.value || "0.30");
+    const duration = Math.max(10, parseFloat(allDurationEl.value || "240"));
+
+    // Progress per second; slower possible now because speed min is 0.02 and duration can be large
+    allProgress += (dtSec * speed) / duration;
+
+    if (allProgress >= 1) {
+      allProgress = 1;
+      allProgressEl.value = String(allProgress);
+      updateAllRender(true);
+
+      if (allLoopEl.checked) {
+        allProgress = 0;
+        allProgressEl.value = "0";
+        allLastTs = null;
+        updateAllRender(true);
+        allRaf = requestAnimationFrame(allTick);
+        return;
+      }
+
+      stopAllAnim();
+      return;
+    }
+
+    allProgressEl.value = String(allProgress);
+    updateAllRender(false);
+    allRaf = requestAnimationFrame(allTick);
+  };
+
+  allPlayBtn.addEventListener("click", () => {
+    if (!allItems.length) return;
+    allPlaying = true;
+    allPlayBtn.disabled = true;
+    allPauseBtn.disabled = false;
+    allLastTs = null;
+    allRaf = requestAnimationFrame(allTick);
+  });
+
+  allPauseBtn.addEventListener("click", stopAllAnim);
+
+  allResetBtn.addEventListener("click", () => {
+    stopAllAnim();
+    allProgress = 0;
+    allProgressEl.value = "0";
+    updateAllRender(true);
+  });
+
+  allProgressEl.addEventListener("input", () => {
+    stopAllAnim();
+    allProgress = Math.max(0, Math.min(1, parseFloat(allProgressEl.value || "0")));
+    updateAllRender(true);
+  });
+
+  animateAllBtn.addEventListener("click", openAllModal);
+
+  // --- Init ---
+  const resetAllState = () => {
+    stopAnim();
+    clearMaps();
+    rawRows = [];
+    header = [];
+    grouped.clear();
+    track = [];
+    birdId = null;
+
+    birdSelect.innerHTML = `<option value="">—</option>`;
+    birdSelect.disabled = true;
+    showAllBtn.disabled = true;
+    animateAllBtn.disabled = true;
+
+    enablePlaybackControls(false);
+
+    metaBird.textContent = "Bird: —";
+    metaTime.textContent = "Time: —";
+    metaCoords.textContent = "Lat/Lon: —";
+    metaInfo.textContent = "Points used: —";
+    timelineTimeEl.textContent = "—";
+
+    setColsEnabled(false);
+    setStatus("Select a CSV file to begin.");
+  };
+
+  resetAllState();
+  setMusicToggleLabel();
+
+  if (!window.L) setStatus("Leaflet failed to load. Check internet connection and refresh.");
+})();
+</script>
+</body>
+</html>
