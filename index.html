@@ -399,13 +399,13 @@
           <div>
             <label>Basemap (labels/style)</label>
             <select id="basemapSelect">
-              <option value="osmStd" selected>OSM Standard (local labels)</option>
+              <option value="esriImgLbl" selected>Esri Imagery + Labels (default)</option>
+              <option value="esriImg">Esri World Imagery (no labels)</option>
+              <option value="osmStd">OSM Standard (local labels)</option>
               <option value="osmDE">OSM DE (Latin transliteration)</option>
               <option value="cartoPos">CARTO Positron (light)</option>
               <option value="cartoVoy">CARTO Voyager (color)</option>
               <option value="opentopo">OpenTopoMap</option>
-              <option value="plOrtho">PL Ortho (Geoportal)</option>
-              <option value="esriImagery">Esri World Imagery</option>
             </select>
           </div>
           <div>
@@ -774,62 +774,44 @@
   const overviewMap = L.map('mapOverview', { zoomControl: false, worldCopyJump: true, attributionControl: false }).setView([20, 0], 2);
 
   const baseDefs = {
+
+    esriImgLbl: {
+      label: "Esri Imagery + Labels",
+      kind: "esriImageryLabels",
+      imageryUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      imageryOpts: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
+      labelsUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      labelsOpts: { maxZoom: 19 }
+    },
+    esriImg: {
+      label: "Esri World Imagery (no labels)",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      opts: { maxZoom: 19, attribution: 'Tiles &copy; Esri' }
+    },
     osmStd: {
       label: "OSM Standard (local labels)",
-      kind: "tile",
-      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      opts: { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      opts: { maxZoom: 19, subdomains: "abc", attribution: '&copy; OpenStreetMap contributors' }
     },
     osmDE: {
       label: "OSM DE (Latin transliteration)",
-      kind: "tile",
       url: "https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png",
       opts: { maxZoom: 19, subdomains: "abc", attribution: '&copy; OpenStreetMap contributors (openstreetmap.de)' }
     },
     cartoPos: {
       label: "CARTO Positron (light)",
-      kind: "tile",
       url: "https://cartodb-basemaps-{s}.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
       opts: { maxZoom: 19, subdomains: "abcd", attribution: 'Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL.' }
     },
     cartoVoy: {
       label: "CARTO Voyager (color)",
-      kind: "tile",
       url: "https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}{r}.png",
       opts: { maxZoom: 19, subdomains: "abcd", attribution: 'Map tiles by Carto, under CC BY 3.0. Data by OpenStreetMap, under ODbL.' }
     },
     opentopo: {
       label: "OpenTopoMap",
-      kind: "tile",
       url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
       opts: { maxZoom: 17, subdomains: "abc", attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap' }
-    },
-
-    // Poland orthophoto (GUGiK / Geoportal) — WMS (HighResolution)
-    plOrtho: {
-      label: "PL Ortho (Geoportal)",
-      kind: "wms",
-      url: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution",
-      opts: {
-        layers: "Raster",
-        format: "image/jpeg",
-        transparent: false,
-        version: "1.3.0",
-        tileSize: 256,
-        maxZoom: 23,
-        attribution: 'GUGiK / geoportal.gov.pl'
-      }
-    },
-
-    // Global satellite imagery
-    esriImagery: {
-      label: "Esri World Imagery",
-      kind: "tile",
-      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      opts: {
-        maxZoom: 19,
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
-      }
     }
   };
 
@@ -843,20 +825,37 @@
   let followBase = null;
   let overviewBase = null;
 
-  const createBaseLayer = (key) => {
-    const def = baseDefs[key] || baseDefs.osmStd;
+  const ensureLabelsPane = (map) => {
+    if (!map) return;
+    const paneName = "labelsPane";
+    if (!map.getPane(paneName)) {
+      map.createPane(paneName);
+      // Above imagery tiles, but below vector overlays (tracks/markers)
+      map.getPane(paneName).style.zIndex = 390;
+      map.getPane(paneName).style.pointerEvents = "none";
+    }
+  };
 
-    // WMS (e.g., PL Ortho) vs normal XYZ tiles
-    if (def.kind === "wms") return L.tileLayer.wms(def.url, def.opts);
+  const createBaseLayer = (key, map) => {
+    const def = baseDefs[key] || baseDefs.esriImgLbl || baseDefs.osmStd;
 
-    return L.tileLayer(def.url, def.opts);
+    // Esri Imagery + Labels (two layers)
+    if (def.kind === "esriImageryLabels") {
+      ensureLabelsPane(map);
+      const imagery = L.tileLayer(def.imageryUrl, def.imageryOpts || {});
+      const labels  = L.tileLayer(def.labelsUrl, Object.assign({}, def.labelsOpts || {}, { pane: "labelsPane" }));
+      return L.layerGroup([imagery, labels]);
+    }
+
+    // Regular single-layer basemaps
+    return L.tileLayer(def.url, def.opts || {});
   };
 
   const applyBasemapToMainMaps = (key) => {
     try { if (followBase) followMap.removeLayer(followBase); } catch(e) {}
     try { if (overviewBase) overviewMap.removeLayer(overviewBase); } catch(e) {}
-    followBase = createBaseLayer(key).addTo(followMap);
-    overviewBase = createBaseLayer(key).addTo(overviewMap);
+    followBase = createBaseLayer(key, followMap).addTo(followMap);
+    overviewBase = createBaseLayer(key, overviewMap).addTo(overviewMap);
   };
 
   basemapSelectEl.addEventListener("change", () => {
@@ -867,10 +866,10 @@
 
   applyBasemapToMainMaps(basemapSelectEl.value);
 
-  const overviewLine = L.polyline([], { weight: 3, opacity: 0.55 }).addTo(overviewMap);
-  const overviewMarker = L.circleMarker([0,0], { radius: 6, weight: 3, color: "#fff", fillColor: "#3388ff", opacity: 1, fillOpacity: 0.95 }).addTo(overviewMap);
+  const overviewLine = L.polyline([], { weight: 3, opacity: 0.60 }).addTo(overviewMap);
+  const overviewMarker = L.circleMarker([0,0], { radius: 6, color: "#fff", weight: 2, opacity: 1, fillColor: "#77d1ff", fillOpacity: 0.9 }).addTo(overviewMap);
   const followLine = L.polyline([], { weight: 4, opacity: 0.60 }).addTo(followMap);
-  const followMarker = L.circleMarker([0,0], { radius: 7, weight: 3, color: "#fff", fillColor: "#3388ff", opacity: 1, fillOpacity: 0.95 }).addTo(followMap);
+  const followMarker = L.circleMarker([0,0], { radius: 7, color: "#fff", weight: 2, opacity: 1, fillColor: "#77d1ff", fillOpacity: 0.9 }).addTo(followMap);
 
   const allOverviewGroup = L.layerGroup().addTo(overviewMap);
 
@@ -1263,11 +1262,11 @@
       totalPts += latlngs.length;
       const c = colorForId(id);
 
-      const line = L.polyline(latlngs, { weight: 2.5, opacity: 0.45, color: c }).addTo(allOverviewGroup);
+      const line = L.polyline(latlngs, { weight: 2.5, opacity: 0.55, color: c }).addTo(allOverviewGroup);
       line.on("click", () => loadTrackFor(id, {autoplay:false}));
 
       const last = latlngs[latlngs.length - 1];
-      const m = L.circleMarker(last, { radius: 6, weight: 3, color: "#fff", fillColor: c, opacity: 1, fillOpacity: 0.95 }).addTo(allOverviewGroup);
+      const m = L.circleMarker(last, { radius: 5, color: "#fff", weight: 2, opacity: 1, fillColor: c, fillOpacity: 0.9 }).addTo(allOverviewGroup);
       m.bindTooltip(id, { direction: "top", offset: [0, -6] });
       m.on("click", () => loadTrackFor(id, {autoplay:false}));
 
@@ -1298,6 +1297,13 @@
 
     birdId = id;
     track = (grouped.get(id) || []).map(p => ({...p}));
+
+    const birdColor = colorForId(birdId);
+    try { overviewLine.setStyle({ color: birdColor, opacity: 0.60, weight: 3 }); } catch(e) {}
+    try { followLine.setStyle({ color: birdColor, opacity: 0.60, weight: 4 }); } catch(e) {}
+    try { overviewMarker.setStyle({ color: "#fff", weight: 2, opacity: 1, fillColor: birdColor, fillOpacity: 0.9 }); } catch(e) {}
+    try { followMarker.setStyle({ color: "#fff", weight: 2, opacity: 1, fillColor: birdColor, fillOpacity: 0.9 }); } catch(e) {}
+
 
     metaBird.textContent = `Bird: ${birdId}`;
     metaInfo.textContent = `Points used: ${track.length}`;
@@ -1700,7 +1706,7 @@
   const applyBasemapToAllMap = (key) => {
     if (!allMap) return;
     try { if (allBase) allMap.removeLayer(allBase); } catch(e) {}
-    allBase = createBaseLayer(key).addTo(allMap);
+    allBase = createBaseLayer(key, allMap).addTo(allMap);
   };
 
   const openAllModal = () => {
@@ -1762,14 +1768,11 @@
 
       const c = colorForId(id);
 
-      const poly = L.polyline([coords[0]], { weight: 3, opacity: 0.50, color: c }).addTo(allLayerGroup);
-      const marker = L.circleMarker(coords[0], { radius: 6, weight: 3, color: "#fff", fillColor: c, opacity: 1, fillOpacity: 0.95 }).addTo(allLayerGroup);
+      const poly = L.polyline([coords[0]], { weight: 3, opacity: 0.60, color: c }).addTo(allLayerGroup);
+      const marker = L.circleMarker(coords[0], { radius: 5, color: "#fff", weight: 2, opacity: 1, fillColor: c, fillOpacity: 0.9 }).addTo(allLayerGroup);
       marker.bindTooltip(id, { permanent:false, direction:"right", offset:[8,0], opacity:0.9, className:"idLabel" });
-      const tooltip = marker.getTooltip ? marker.getTooltip() : null;
-      try { if (tooltip && tooltip.setOpacity) tooltip.setOpacity(0); } catch(e) {}
 
-
-      allItems.push({ id, coords, times, poly, marker, tooltip, n: times.length, active:false });
+      allItems.push({ id, coords, times, poly, marker, n: times.length, labelOpen:false });
     }
 
     const nBirds = allItems.length;
@@ -1873,14 +1876,9 @@ allProgress = 0;
       const t1 = it.times[it.times.length - 1];
 
       if (tNowMs < t0 || tNowMs > t1) {
-        // Hide track + marker and also hide the label (tooltip) when this individual is not active
         it.poly.setLatLngs([]);
         it.marker.setStyle({ opacity: 0, fillOpacity: 0 });
-        if (it.active) {
-          it.active = false;
-          try { it.marker.closeTooltip(); } catch(e) {}
-          try { if (it.tooltip && it.tooltip.setOpacity) it.tooltip.setOpacity(0); } catch(e) {}
-        }
+        if (it.labelOpen) { try { it.marker.closeTooltip(); } catch(e) {} it.labelOpen = false; }
         continue;
       }
 
@@ -1902,16 +1900,9 @@ allProgress = 0;
 
       it.poly.setLatLngs(partial);
       it.marker.setLatLng([lat, lon]);
-      it.marker.setStyle({ opacity: 1, fillOpacity: 0.95 });
-      // Show label (tooltip) when this individual becomes active
-      if (!it.active) {
-        it.active = true;
-        try { if (it.tooltip && it.tooltip.setOpacity) it.tooltip.setOpacity(0.9); } catch(e) {}
-        try { it.marker.openTooltip(); } catch(e) {}
-      } else {
-        // Keep tooltip visible while active (some browsers may close on rapid updates)
-        try { if (it.marker.isTooltipOpen && !it.marker.isTooltipOpen()) it.marker.openTooltip(); } catch(e) {}
-      }
+      it.marker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+
+      if (!it.labelOpen) { try { it.marker.openTooltip(); } catch(e) {} it.labelOpen = true; }
 
       activeCount += 1;
       const ll = L.latLng(lat, lon);
