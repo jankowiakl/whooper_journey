@@ -429,8 +429,18 @@
             <select id="colId" disabled><option value="">—</option></select>
           </div>
           <div>
+            <label>ID_ALL column (optional)</label>
+            <select id="colIdAll" disabled><option value="">—</option></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
             <label>Datetime column</label>
             <select id="colTime" disabled><option value="">—</option></select>
+          </div>
+          <div>
+            <div class="miniNote" style="margin-top:28px;">Used only for “Animate ALL At Once”. Leave empty to use the normal ID.</div>
           </div>
         </div>
 
@@ -538,6 +548,7 @@
           <div class="btnrow" style="margin-top:0;">
             <button id="showAllBtn" class="secondary" type="button" disabled>Show ALL (static)</button>
             <button id="animateAllBtn" type="button" disabled>Animate ALL</button>
+            <button id="animateAllAlignedBtn" class="secondary" type="button" disabled>Animate ALL At Once</button>
           </div>
         </div>
       </div>
@@ -614,6 +625,7 @@
       <button id="allFitAllBtn" class="secondary tiny" type="button" title="Fit map to the full extent of all birds">Fit all</button>
       <label class="pillMini" title="Auto-fit (turns off when you zoom/pan)"><input id="allAutoFit" type="checkbox" style="transform:translateY(1px);" checked> Auto-fit</label>
       <label class="pillMini" title="Loop the ALL animation"><input id="allLoop" type="checkbox" style="transform:translateY(1px);"> Loop</label>
+      <label class="pillMini" title="Show bird labels during the ALL animation"><input id="allShowLabels" type="checkbox" style="transform:translateY(1px);" checked> Labels</label>
 
       <div class="pillMini" id="allStats">—</div>
       <div class="pillMini" id="allTimeNow">Time: —</div>
@@ -680,6 +692,7 @@
   const delimiterEl = el("delimiter");
   const hasHeaderEl = el("hasHeader");
   const colIdEl = el("colId");
+  const colIdAllEl = el("colIdAll");
   const colTimeEl = el("colTime");
   const colLatEl = el("colLat");
   const colLonEl = el("colLon");
@@ -697,6 +710,7 @@
   const birdSelect = el("birdSelect");
   const showAllBtn = el("showAllBtn");
   const animateAllBtn = el("animateAllBtn");
+  const animateAllAlignedBtn = el("animateAllAlignedBtn");
 
   const playBtn = el("playBtn");
   const pauseBtn = el("pauseBtn");
@@ -737,6 +751,7 @@
   const allFitAllBtn = el("allFitAllBtn");
   const allAutoFitEl = el("allAutoFit");
   const allLoopEl = el("allLoop");
+  const allShowLabelsEl = el("allShowLabels");
   const allProgressEl = el("allProgress");
   const allProgressLabelEl = el("allProgressLabel");
   const allSpeedEl = el("allSpeed");
@@ -944,6 +959,7 @@
   let rawRows = [];
   let header = [];
   const grouped = new Map(); // id -> points[]
+  const groupedAll = new Map(); // id_all (or id fallback) -> track entries[]
   let track = [];
   let birdId = null;
 
@@ -965,6 +981,10 @@
   const fmtTime = (d) => {
     if (!d || isNaN(d.getTime())) return "—";
     return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  };
+  const fmtTimeNoYear = (d) => {
+    if (!d || isNaN(d.getTime())) return "—";
+    return `${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   };
 
   // Stronger datetime parsing (ISO, space-separated, slash formats, unix seconds/ms)
@@ -1022,10 +1042,42 @@
 
     // As a last try: replace space with T and add Z
     const s2 = s0.replace(" ", "T");
-    const dUtc = new Date(s2 + "Z");
-    if (!isNaN(dUtc.getTime())) return dUtc;
+  const dUtc = new Date(s2 + "Z");
+  if (!isNaN(dUtc.getTime())) return dUtc;
 
-    return null;
+  return null;
+  };
+
+  const latestGroupedYear = (sourceMap = grouped) => {
+    let maxYear = null;
+    for (const pts of sourceMap.values()) {
+      for (const p of pts) {
+        if (!p.dt || isNaN(p.dt.getTime())) continue;
+        const y = p.dt.getFullYear();
+        maxYear = (maxYear == null) ? y : Math.max(maxYear, y);
+      }
+    }
+    return maxYear;
+  };
+
+  const daysInMonth = (year, monthIndex) => new Date(year, monthIndex + 1, 0).getDate();
+
+  const remapDateToYear = (dt, year) => {
+    if (!dt || isNaN(dt.getTime()) || !Number.isFinite(year)) return null;
+
+    const month = dt.getMonth();
+    const day = Math.min(dt.getDate(), daysInMonth(year, month));
+    const mapped = new Date(
+      year,
+      month,
+      day,
+      dt.getHours(),
+      dt.getMinutes(),
+      dt.getSeconds(),
+      dt.getMilliseconds()
+    );
+
+    return isNaN(mapped.getTime()) ? null : mapped;
   };
 
   const lerp = (a,b,t) => a + (b-a)*t;
@@ -1071,7 +1123,7 @@
     timelineEl.disabled = !enabled;
   };
 
-  const idsSorted = () => Array.from(grouped.keys()).sort();
+  const idsSorted = (sourceMap = grouped) => Array.from(sourceMap.keys()).sort();
 
   // Follow behavior
   const maybeMoveFollowMap = (lat, lon, ts) => {
@@ -1419,6 +1471,7 @@
   // --- CSV parsing / column selection ---
   const setColsEnabled = (enabled) => {
     colIdEl.disabled = !enabled;
+    colIdAllEl.disabled = !enabled;
     colTimeEl.disabled = !enabled;
     colLatEl.disabled = !enabled;
     colLonEl.disabled = !enabled;
@@ -1431,12 +1484,27 @@
       cols.map((c, idx) => `<option value="${idx}">${String(c)}</option>`)
     ).join("");
     colIdEl.innerHTML = opts;
+    colIdAllEl.innerHTML = opts;
     colTimeEl.innerHTML = opts;
     colLatEl.innerHTML = opts;
     colLonEl.innerHTML = opts;
   };
 
   const normalizeHeader = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const findOptionalIdAllKey = (cols) => {
+    const norm = cols.map(c => normalizeHeader(c));
+    const candidates = ["id_all", "id all", "all id", "idall"];
+
+    for (const cand of candidates) {
+      const idx = norm.indexOf(cand);
+      if (idx >= 0) return cols[idx];
+    }
+    for (const cand of candidates) {
+      const idx = norm.findIndex(x => x.includes(cand));
+      if (idx >= 0) return cols[idx];
+    }
+    return null;
+  };
   const autoGuess = (cols) => {
     const norm = cols.map(c => normalizeHeader(c));
 
@@ -1462,6 +1530,11 @@
     ]);
 
     if (idIdx >= 0) colIdEl.value = String(idIdx);
+    const idAllKey = findOptionalIdAllKey(cols);
+    if (idAllKey != null) {
+      const idx = cols.indexOf(idAllKey);
+      if (idx >= 0) colIdAllEl.value = String(idx);
+    }
     if (latIdx >= 0) colLatEl.value = String(latIdx);
     if (lonIdx >= 0) colLonEl.value = String(lonIdx);
     if (timeIdx >= 0) colTimeEl.value = String(timeIdx);
@@ -1474,6 +1547,7 @@
     rawRows = [];
     header = [];
     grouped.clear();
+    groupedAll.clear();
 
     track = [];
     birdId = null;
@@ -1482,6 +1556,7 @@
     birdSelect.disabled = true;
     showAllBtn.disabled = true;
     animateAllBtn.disabled = true;
+    animateAllAlignedBtn.disabled = true;
 
     enablePlaybackControls(false);
 
@@ -1527,7 +1602,8 @@
     setStatus(
       `Parsed rows: ${rawRows.length}\n` +
       `Now select columns (ID, datetime, lat, lon) and click “Apply columns”.\n\n` +
-      `Tip: your example “UID / Collecting time / Longitude / Latitude” is supported.`
+      `Tip: your example “UID / Collecting time / Longitude / Latitude” is supported.\n` +
+      `Optional: choose an ID_ALL column if “Animate ALL At Once” should group repeated yearly IDs into one main bird.`
     );
 
     return true;
@@ -1593,8 +1669,10 @@
 
   const buildGroups = () => {
     grouped.clear();
+    groupedAll.clear();
 
     const idIdx = parseInt(colIdEl.value, 10);
+    const idAllIdx = parseInt(colIdAllEl.value, 10);
     const timeIdx = parseInt(colTimeEl.value, 10);
     const latIdx = parseInt(colLatEl.value, 10);
     const lonIdx = parseInt(colLonEl.value, 10);
@@ -1608,6 +1686,7 @@
     const timeKey = header[timeIdx];
     const latKey = header[latIdx];
     const lonKey = header[lonIdx];
+    const idAllKey = !isNaN(idAllIdx) ? header[idAllIdx] : null;
 
     let used = 0;
     let timed = 0;
@@ -1615,6 +1694,8 @@
     for (let i=0; i<rawRows.length; i++) {
       const r = rawRows[i] || {};
       const id = String(r[idKey] ?? "").trim();
+      const idAllRaw = idAllKey ? String(r[idAllKey] ?? "").trim() : "";
+      const idAll = idAllRaw || id;
       const lat = parseFloat(String(r[latKey] ?? "").trim());
       const lon = parseFloat(String(r[lonKey] ?? "").trim());
       const dt = parseDateLoose(r[timeKey]);
@@ -1622,8 +1703,9 @@
       if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
       if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
 
+      const point = { dt, lat, lon, rowIndex: i+1, id, idAll };
       if (!grouped.has(id)) grouped.set(id, []);
-      grouped.get(id).push({ dt, lat, lon, rowIndex: i+1 });
+      grouped.get(id).push(point);
 
       used++;
       if (dt && !isNaN(dt.getTime())) timed++;
@@ -1639,7 +1721,24 @@
       });
     }
 
+    for (const [id, arr] of grouped.entries()) {
+      const first = arr[0] || null;
+      const idAll = first && first.idAll ? first.idAll : id;
+      if (!groupedAll.has(idAll)) groupedAll.set(idAll, []);
+      groupedAll.get(idAll).push({ id, idAll, points: arr });
+    }
+
+    for (const tracks of groupedAll.values()) {
+      tracks.sort((a, b) => {
+        const a0 = (a.points && a.points[0] && a.points[0].dt) ? a.points[0].dt.getTime() : Infinity;
+        const b0 = (b.points && b.points[0] && b.points[0].dt) ? b.points[0].dt.getTime() : Infinity;
+        if (a0 !== b0) return a0 - b0;
+        return String(a.id).localeCompare(String(b.id));
+      });
+    }
+
     const ids = idsSorted();
+    const allIds = idsSorted(groupedAll);
     birdSelect.innerHTML =
       `<option value="">— select —</option>` +
       ids.map(id => `<option value="${id}">${id} (${grouped.get(id).length} points)</option>`).join("");
@@ -1647,13 +1746,15 @@
 
     showAllBtn.disabled = ids.length === 0;
     animateAllBtn.disabled = ids.length === 0;
+    animateAllAlignedBtn.disabled = allIds.length === 0;
 
     setStatus(
       `Applied columns.\n` +
       `- Rows parsed: ${rawRows.length}\n` +
       `- Usable points: ${used}\n` +
       `- Points with valid datetime: ${timed}\n` +
-      `- Individuals detected: ${ids.length}\n\n` +
+      `- Individuals detected: ${ids.length}\n` +
+      `- ALL At Once groups: ${allIds.length}${idAllKey ? ` (using ${idAllKey})` : " (using ID)"}\n\n` +
       `Pick a bird in Playback (visible even when Settings are hidden).`
     );
 
@@ -1688,6 +1789,10 @@
   let allProgress = 0;      // 0..1
   let allMinMs = null;
   let allMaxMs = null;
+  let allDisplayYear = null;
+  let allYearSpanMs = null;
+  let allMode = "calendar";
+  let allShowLabels = true;
   let allLastFitAt = 0;
   // --- ALL map fit / auto-fit controls ---
   const ALL_MAX_FIT_ZOOM = 11;  // prevents "too close" zoom when only 1 bird/point is active
@@ -1702,6 +1807,18 @@
   const setAllAutoFit = (v) => {
     allAutoFit = !!v;
     if (allAutoFitEl) allAutoFitEl.checked = allAutoFit;
+  };
+
+  const setAllShowLabels = (v) => {
+    allShowLabels = !!v;
+    if (allShowLabelsEl) allShowLabelsEl.checked = allShowLabels;
+    for (const it of allItems) {
+      if (!it || !it.marker) continue;
+      if (!allShowLabels && it.labelOpen) {
+        try { it.marker.closeTooltip(); } catch(e) {}
+        it.labelOpen = false;
+      }
+    }
   };
 
   const isPointBounds = (b) => {
@@ -1766,9 +1883,181 @@
     allBase = createBaseLayer(key, allMap).addTo(allMap);
   };
 
-  const openAllModal = () => {
-    const ids = idsSorted();
+  const getTimedPointsForBird = (id, sourceMap = grouped) => {
+    const pts = sourceMap.get(id) || [];
+    return pts.filter(p => p.dt && !isNaN(p.dt.getTime()));
+  };
+
+  const buildAllItemsCalendar = (ids, sourceMap = grouped) => {
+    const items = [];
+    let minMs = null;
+    let maxMs = null;
+    let totalPts = 0;
+
+    for (const id of ids) {
+      const pts = sourceMap.get(id) || [];
+      const coords = [];
+      const times = [];
+
+      for (const p of pts) {
+        if (!p.dt || isNaN(p.dt.getTime())) continue;
+        coords.push([p.lat, p.lon]);
+        times.push(p.dt.getTime());
+      }
+
+      if (times.length < 2) continue;
+
+      totalPts += times.length;
+      minMs = (minMs == null) ? times[0] : Math.min(minMs, times[0]);
+      maxMs = (maxMs == null) ? times[times.length - 1] : Math.max(maxMs, times[times.length - 1]);
+      items.push({ id, coords, times, trackId: id, sourceStartYear: null, mappedBaseYear: null });
+    }
+
+    const rangeStr = (minMs != null && maxMs != null) ? `${fmtTime(new Date(minMs))} → ${fmtTime(new Date(maxMs))}` : "—";
+    return {
+      items,
+      minMs,
+      maxMs,
+      displayYear: latestGroupedYear(sourceMap),
+      yearSpanMs: null,
+      totalPts,
+      subtitle: `${items.length} individuals • ${rangeStr}`
+    };
+  };
+
+  const chooseSyntheticSharedYear = (prepared) => {
+    const usedYears = new Set();
+    let maxSpanMs = 0;
+
+    for (const item of prepared) {
+      let firstMs = null;
+      let lastMs = null;
+      for (const p of item.pts || []) {
+        if (!p.dt || isNaN(p.dt.getTime())) continue;
+        const t = p.dt.getTime();
+        usedYears.add(p.dt.getFullYear());
+        firstMs = (firstMs == null) ? t : Math.min(firstMs, t);
+        lastMs = (lastMs == null) ? t : Math.max(lastMs, t);
+      }
+      if (firstMs != null && lastMs != null) maxSpanMs = Math.max(maxSpanMs, lastMs - firstMs);
+    }
+
+    const yearMs = 366 * 24 * 60 * 60 * 1000;
+    const extraYearsNeeded = Math.max(1, Math.floor(maxSpanMs / yearMs));
+
+    const candidates = [];
+    for (let year = 1900; year <= 2400; year++) {
+      let ok = true;
+      for (let offset = 0; offset <= extraYearsNeeded; offset++) {
+        if (usedYears.has(year + offset)) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) candidates.push(year);
+    }
+
+    if (candidates.length) {
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    let fallbackYear = usedYears.size ? (Math.max(...usedYears) + 2) : 2000;
+    while (true) {
+      let ok = true;
+      for (let offset = 0; offset <= extraYearsNeeded; offset++) {
+        if (usedYears.has(fallbackYear + offset)) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return fallbackYear;
+      fallbackYear += 1;
+    }
+  };
+
+  const buildAllItemsAligned = (ids, sourceMap = groupedAll) => {
+    const items = [];
+    let minMs = null;
+    let maxMs = null;
+    let totalPts = 0;
+    const prepared = [];
+
+    for (const idAll of ids) {
+      const tracks = sourceMap.get(idAll) || [];
+      let best = null;
+
+      for (const track of tracks) {
+        const pts = (track.points || []).filter(p => p.dt && !isNaN(p.dt.getTime()));
+        if (pts.length < 2) continue;
+
+        const startMs = pts[0].dt.getTime();
+        const endMs = pts[pts.length - 1].dt.getTime();
+        const spanMs = Math.max(0, endMs - startMs);
+
+        if (
+          !best ||
+          spanMs > best.spanMs ||
+          (spanMs === best.spanMs && pts.length > best.pts.length) ||
+          (spanMs === best.spanMs && pts.length === best.pts.length && startMs < best.startMs)
+        ) {
+          best = { id: idAll, trackId: track.id, pts, spanMs, startMs };
+        }
+      }
+
+      if (best) {
+        prepared.push(best);
+      }
+    }
+
+    if (!prepared.length) {
+      return { items:[], minMs:null, maxMs:null, displayYear:null, yearSpanMs:null, totalPts:0, subtitle:`No usable datetime (need at least 2 dated points per bird).` };
+    }
+
+    const seasonYear = chooseSyntheticSharedYear(prepared);
+
+    for (const item of prepared) {
+      const coords = [];
+      const times = [];
+      const sourceStartYear = item.pts[0].dt.getFullYear();
+
+      for (const p of item.pts) {
+        const yearOffset = p.dt.getFullYear() - sourceStartYear;
+        const mapped = remapDateToYear(p.dt, seasonYear + yearOffset);
+        if (!mapped) continue;
+        coords.push([p.lat, p.lon]);
+        times.push(mapped.getTime());
+      }
+
+      if (times.length < 2) continue;
+
+      totalPts += times.length;
+      minMs = (minMs == null) ? times[0] : Math.min(minMs, times[0]);
+      maxMs = (maxMs == null) ? times[times.length - 1] : Math.max(maxMs, times[times.length - 1]);
+      items.push({ id:item.id, trackId:item.trackId, coords, times, sourceStartYear, mappedBaseYear: seasonYear });
+    }
+
+    if (!items.length) {
+      return { items:[], minMs:null, maxMs:null, displayYear:null, yearSpanMs:null, totalPts:0, subtitle:`No usable datetime (need at least 2 dated points per bird).` };
+    }
+
+    const rangeStr = `${fmtTimeNoYear(new Date(minMs))} → ${fmtTimeNoYear(new Date(maxMs))}`;
+
+    return {
+      items,
+      minMs,
+      maxMs,
+      displayYear: seasonYear,
+      yearSpanMs: null,
+      totalPts,
+      subtitle: `${items.length} individuals • one main ID per bird • shared year ${seasonYear} • ${rangeStr}`
+    };
+  };
+
+  const openAllModal = (mode="calendar") => {
+    const sourceMap = (mode === "aligned") ? groupedAll : grouped;
+    const ids = idsSorted(sourceMap);
     if (!ids.length) return;
+    allMode = mode === "aligned" ? "aligned" : "calendar";
 
     allModal.classList.add("show");
 
@@ -1789,6 +2078,7 @@
 
     // Auto-fit starts ON each time you open the ALL panel
     setAllAutoFit(true);
+    setAllShowLabels(allShowLabels);
 
     // If the user zooms/pans manually, turn auto-fit off (so the view doesn't keep snapping back)
     if (allMap && !allMap.__allAutoFitHooked) {
@@ -1802,34 +2092,33 @@
     allItems = [];
     allMinMs = null;
     allMaxMs = null;
+    allDisplayYear = null;
+    allYearSpanMs = null;
 
-    let totalPts = 0;
+    const built = (allMode === "aligned") ? buildAllItemsAligned(ids, sourceMap) : buildAllItemsCalendar(ids, sourceMap);
+    allMinMs = built.minMs;
+    allMaxMs = built.maxMs;
+    allDisplayYear = built.displayYear;
+    allYearSpanMs = built.yearSpanMs;
 
-    for (const id of ids) {
-      const pts = grouped.get(id) || [];
+    for (const item of built.items) {
+      const c = colorForId(item.id);
+      const poly = L.polyline([item.coords[0]], { weight: 3, opacity: 0.60, color: c }).addTo(allLayerGroup);
+      const marker = L.circleMarker(item.coords[0], { radius: 5, color: "#fff", weight: 2, opacity: 1, fillColor: c, fillOpacity: 0.9 }).addTo(allLayerGroup);
+      marker.bindTooltip(item.id, { permanent:false, direction:"right", offset:[8,0], opacity:0.9, className:"idLabel" });
 
-      // keep only points with valid datetime
-      const coords = [];
-      const times = [];
-      for (const p of pts) {
-        if (!p.dt || isNaN(p.dt.getTime())) continue;
-        coords.push([p.lat, p.lon]);
-        times.push(p.dt.getTime());
-      }
-
-      if (times.length < 2) continue; // need time interpolation
-      totalPts += times.length;
-
-      allMinMs = (allMinMs == null) ? times[0] : Math.min(allMinMs, times[0]);
-      allMaxMs = (allMaxMs == null) ? times[times.length-1] : Math.max(allMaxMs, times[times.length-1]);
-
-      const c = colorForId(id);
-
-      const poly = L.polyline([coords[0]], { weight: 3, opacity: 0.60, color: c }).addTo(allLayerGroup);
-      const marker = L.circleMarker(coords[0], { radius: 5, color: "#fff", weight: 2, opacity: 1, fillColor: c, fillOpacity: 0.9 }).addTo(allLayerGroup);
-      marker.bindTooltip(id, { permanent:false, direction:"right", offset:[8,0], opacity:0.9, className:"idLabel" });
-
-      allItems.push({ id, coords, times, poly, marker, n: times.length, labelOpen:false });
+      allItems.push({
+        id:item.id,
+        trackId:item.trackId || item.id,
+        coords:item.coords,
+        times:item.times,
+        sourceStartYear:item.sourceStartYear,
+        mappedBaseYear:item.mappedBaseYear,
+        poly,
+        marker,
+        n:item.times.length,
+        labelOpen:false
+      });
     }
 
     const nBirds = allItems.length;
@@ -1853,13 +2142,12 @@
     }
     // Initial view: fit everything, but cap max zoom so a single-id/single-point file doesn't zoom in too far
     if (allAllBounds) safeFitAllMap(allAllBounds, { padding:[20,20], maxZoom: ALL_MAX_FIT_ZOOM, pointZoom: ALL_POINT_ZOOM });
-allProgress = 0;
+    allProgress = 0;
     allProgressEl.value = "0";
     allLastFitAt = 0;
 
-    const rangeStr = `${fmtTime(new Date(allMinMs))} → ${fmtTime(new Date(allMaxMs))}`;
-    allModalSub.textContent = `${nBirds} individuals • ${rangeStr}`;
-    allStatsEl.textContent = `${nBirds} birds • ${totalPts} timed pts`;
+    allModalSub.textContent = built.subtitle;
+    allStatsEl.textContent = `${nBirds} birds • ${built.totalPts} timed pts`;
 
     updateAllRender(true);
     stopAllAnim();
@@ -1914,11 +2202,24 @@ allProgress = 0;
     return { i: lo, t: Math.max(0, Math.min(1, frac)) };
   };
 
+  const mapAllTimeToTrack = (it, tMs) => {
+    if (!it || !it.times || !it.times.length) return null;
+    const first = it.times[0];
+    const last = it.times[it.times.length - 1];
+    if (tMs < first || tMs > last) return null;
+    return tMs;
+  };
+
+  const buildAllTooltipHtml = (it, tTrackMs) => {
+    if (!it) return "";
+    return it.id;
+  };
+
   const updateAllRender = (forceFit=false) => {
     if (!allItems.length || allMinMs == null || allMaxMs == null) return;
 
     const tNowMs = allMinMs + allProgress * (allMaxMs - allMinMs);
-    const tStr = fmtTime(new Date(tNowMs));
+    const tStr = (allMode === "aligned") ? fmtTimeNoYear(new Date(tNowMs)) : fmtTime(new Date(tNowMs));
     allTimeNowEl.textContent = `Time: ${tStr}`;
     allTimeOverlayEl.textContent = `Time: ${tStr}`;
 
@@ -1929,17 +2230,16 @@ allProgress = 0;
     let activeCount = 0;
 
     for (const it of allItems) {
-      const t0 = it.times[0];
-      const t1 = it.times[it.times.length - 1];
+      const tTrackMs = mapAllTimeToTrack(it, tNowMs);
 
-      if (tNowMs < t0 || tNowMs > t1) {
+      if (tTrackMs == null) {
         it.poly.setLatLngs([]);
         it.marker.setStyle({ opacity: 0, fillOpacity: 0 });
         if (it.labelOpen) { try { it.marker.closeTooltip(); } catch(e) {} it.labelOpen = false; }
         continue;
       }
 
-      const seg = findSegment(it.times, tNowMs);
+      const seg = findSegment(it.times, tTrackMs);
       const a = it.coords[seg.i];
       const b = it.coords[seg.i + 1];
 
@@ -1958,8 +2258,14 @@ allProgress = 0;
       it.poly.setLatLngs(partial);
       it.marker.setLatLng([lat, lon]);
       it.marker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+      try { it.marker.setTooltipContent(buildAllTooltipHtml(it, tTrackMs)); } catch(e) {}
 
-      if (!it.labelOpen) { try { it.marker.openTooltip(); } catch(e) {} it.labelOpen = true; }
+      if (allShowLabels) {
+        if (!it.labelOpen) { try { it.marker.openTooltip(); } catch(e) {} it.labelOpen = true; }
+      } else if (it.labelOpen) {
+        try { it.marker.closeTooltip(); } catch(e) {}
+        it.labelOpen = false;
+      }
 
       activeCount += 1;
       const ll = L.latLng(lat, lon);
@@ -2046,7 +2352,15 @@ allProgress = 0;
     updateAllRender(true);
   });
 
-  animateAllBtn.addEventListener("click", openAllModal);
+  if (allShowLabelsEl) {
+    allShowLabelsEl.addEventListener("change", () => {
+      setAllShowLabels(allShowLabelsEl.checked);
+      if (allModal.classList.contains("show")) updateAllRender(true);
+    });
+  }
+
+  animateAllBtn.addEventListener("click", () => openAllModal("calendar"));
+  animateAllAlignedBtn.addEventListener("click", () => openAllModal("aligned"));
 
   // --- Init ---
   const resetAllState = () => {
@@ -2055,6 +2369,7 @@ allProgress = 0;
     rawRows = [];
     header = [];
     grouped.clear();
+    groupedAll.clear();
     track = [];
     birdId = null;
 
