@@ -465,6 +465,7 @@
             <label>Basemap (labels/style)</label>
             <select id="basemapSelect">
               <option value="esriImgLbl" selected>Esri Imagery + Labels (default)</option>
+              <option value="esriTerrainLbl">ArcGIS Terrain with Labels</option>
               <option value="esriImg">Esri World Imagery (no labels)</option>
               <option value="osmStd">OSM Standard (local labels)</option>
               <option value="osmDE">OSM DE (Latin transliteration)</option>
@@ -855,6 +856,14 @@
       labelsUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
       labelsOpts: { maxZoom: 19 }
     },
+    esriTerrainLbl: {
+      label: "ArcGIS Terrain with Labels",
+      kind: "esriBaseReference",
+      baseUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}",
+      baseOpts: { maxZoom: 13, attribution: 'Tiles &copy; Esri' },
+      referenceUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}",
+      referenceOpts: { maxZoom: 13 }
+    },
     esriImg: {
       label: "Esri World Imagery (no labels)",
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -911,12 +920,18 @@
   const createBaseLayer = (key, map) => {
     const def = baseDefs[key] || baseDefs.esriImgLbl || baseDefs.osmStd;
 
-    // Esri Imagery + Labels (two layers)
+    // Esri basemaps composed of a base layer plus a reference/label overlay
     if (def.kind === "esriImageryLabels") {
       ensureLabelsPane(map);
       const imagery = L.tileLayer(def.imageryUrl, def.imageryOpts || {});
       const labels  = L.tileLayer(def.labelsUrl, Object.assign({}, def.labelsOpts || {}, { pane: "labelsPane" }));
       return L.layerGroup([imagery, labels]);
+    }
+    if (def.kind === "esriBaseReference") {
+      ensureLabelsPane(map);
+      const baseLayer = L.tileLayer(def.baseUrl, def.baseOpts || {});
+      const referenceLayer = L.tileLayer(def.referenceUrl, Object.assign({}, def.referenceOpts || {}, { pane: "labelsPane" }));
+      return L.layerGroup([baseLayer, referenceLayer]);
     }
 
     // Regular single-layer basemaps
@@ -1061,14 +1076,16 @@
   };
 
   const daysInMonth = (year, monthIndex) => new Date(year, monthIndex + 1, 0).getDate();
+  const ALIGNED_SEASON_START_MONTH = 5; // June (0 = January)
 
-  const remapDateToYear = (dt, year) => {
-    if (!dt || isNaN(dt.getTime()) || !Number.isFinite(year)) return null;
+  const remapDateToSeasonYear = (dt, seasonYear, seasonStartMonth = ALIGNED_SEASON_START_MONTH) => {
+    if (!dt || isNaN(dt.getTime()) || !Number.isFinite(seasonYear)) return null;
 
     const month = dt.getMonth();
-    const day = Math.min(dt.getDate(), daysInMonth(year, month));
+    const targetYear = seasonYear + (month < seasonStartMonth ? 1 : 0);
+    const day = Math.min(dt.getDate(), daysInMonth(targetYear, month));
     const mapped = new Date(
-      year,
+      targetYear,
       month,
       day,
       dt.getHours(),
@@ -1078,6 +1095,32 @@
     );
 
     return isNaN(mapped.getTime()) ? null : mapped;
+  };
+
+  const seasonSortKey = (dt, seasonStartMonth = ALIGNED_SEASON_START_MONTH) => {
+    if (!dt || isNaN(dt.getTime())) return null;
+
+    const month = dt.getMonth();
+    const refYear = 2000 + (month < seasonStartMonth ? 1 : 0);
+    const day = Math.min(dt.getDate(), daysInMonth(refYear, month));
+    return new Date(
+      refYear,
+      month,
+      day,
+      dt.getHours(),
+      dt.getMinutes(),
+      dt.getSeconds(),
+      dt.getMilliseconds()
+    ).getTime();
+  };
+
+  const rotatePointsToSeasonStart = (pts, seasonStartMonth = ALIGNED_SEASON_START_MONTH) => {
+    if (!Array.isArray(pts) || pts.length < 2) return Array.isArray(pts) ? pts.slice() : [];
+
+    const splitIndex = pts.findIndex(p => p && p.dt && !isNaN(p.dt.getTime()) && p.dt.getMonth() >= seasonStartMonth);
+    if (splitIndex <= 0) return pts.slice();
+
+    return pts.slice(splitIndex).concat(pts.slice(0, splitIndex));
   };
 
   const lerp = (a,b,t) => a + (b-a)*t;
@@ -2018,14 +2061,22 @@
     for (const item of prepared) {
       const coords = [];
       const times = [];
-      const sourceStartYear = item.pts[0].dt.getFullYear();
+      const rotatedPts = rotatePointsToSeasonStart(item.pts, ALIGNED_SEASON_START_MONTH);
+      const sourceStartYear = rotatedPts[0].dt.getFullYear();
+      let cycleOffset = 0;
+      let prevSeasonKey = null;
 
-      for (const p of item.pts) {
-        const yearOffset = p.dt.getFullYear() - sourceStartYear;
-        const mapped = remapDateToYear(p.dt, seasonYear + yearOffset);
+      for (const p of rotatedPts) {
+        const currentSeasonKey = seasonSortKey(p.dt, ALIGNED_SEASON_START_MONTH);
+        if (prevSeasonKey != null && currentSeasonKey != null && currentSeasonKey < prevSeasonKey) {
+          cycleOffset += 1;
+        }
+
+        const mapped = remapDateToSeasonYear(p.dt, seasonYear + cycleOffset, ALIGNED_SEASON_START_MONTH);
         if (!mapped) continue;
         coords.push([p.lat, p.lon]);
         times.push(mapped.getTime());
+        prevSeasonKey = currentSeasonKey;
       }
 
       if (times.length < 2) continue;
@@ -2049,7 +2100,7 @@
       displayYear: seasonYear,
       yearSpanMs: null,
       totalPts,
-      subtitle: `${items.length} individuals • one main ID per bird • shared year ${seasonYear} • ${rangeStr}`
+      subtitle: `${items.length} individuals • one main ID per bird • season starts in June • shared year ${seasonYear} • ${rangeStr}`
     };
   };
 
